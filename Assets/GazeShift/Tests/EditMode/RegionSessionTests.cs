@@ -62,12 +62,81 @@ namespace GazeShift.Tests
             DrawCircle(session, Vector2.zero); session.AddPoint(new Vector2(0.3f, 0.3f));
             Assert.IsFalse(session.FinishStroke());
         }
-        [Test] public void UndoRemovesOnlyLatestPendingRegion()
+        [Test] public void UndoRemovesLatestPendingThenAcceptedInReverseOrder()
         {
             var session = new RegionSession();
-            DrawCircle(session, new Vector2(-0.2f, 0)); session.FinishStroke(); session.AcceptPending();
-            DrawCircle(session, new Vector2(0.2f, 0)); session.FinishStroke(); session.UndoPending();
-            Assert.AreEqual(0, session.Pending.Count); Assert.AreEqual(1, session.Accepted.Count);
+            DrawCircle(session, new Vector2(-0.25f, 0)); session.FinishStroke();
+            DrawCircle(session, new Vector2(0.25f, 0)); session.FinishStroke();
+            Assert.IsTrue(session.AcceptPending());
+            RegionData first = session.Accepted[0], second = session.Accepted[1];
+            DrawCircle(session, new Vector2(0, -0.25f)); Assert.IsTrue(session.FinishStroke());
+            RegionData pending = session.Pending[0];
+            Assert.AreSame(pending, session.UndoLast());
+            Assert.AreEqual(2, session.Accepted.Count);
+            Assert.AreSame(second, session.UndoLast());
+            Assert.AreSame(first, session.UndoLast());
+            Assert.IsNull(session.UndoLast());
+            Assert.AreEqual(0, session.Pending.Count); Assert.AreEqual(0, session.Accepted.Count);
+        }
+        [Test] public void AcceptanceUsesOriginalScaleAndClosestCandidateToCenter()
+        {
+            var session = new RegionSession();
+            DrawCircle(session, new Vector2(-0.35f, 0)); Assert.IsTrue(session.FinishStroke());
+            Assert.IsTrue(session.AcceptPending());
+            Assert.AreEqual(1, session.Accepted[0].Scale);
+            Assert.AreEqual(Vector2.zero, session.Accepted[0].Destination);
+        }
+        [Test] public void CrowdedCanvasDoesNotShrinkAndLeavesAllPendingUnchanged()
+        {
+            var session = new RegionSession();
+            DrawCircle(session, new Vector2(-0.5f, 0.25f)); Assert.IsTrue(session.FinishStroke());
+            session.BeginTrigger(false);
+            Vector2[] corners = { new Vector2(-0.34f, -0.3f), new Vector2(0.34f, -0.3f), new Vector2(0.34f, 0.3f), new Vector2(-0.34f, 0.3f) };
+            for (int edge = 0; edge < 4; edge++)
+                for (int i = 0; i < 10; i++) session.AddPoint(corners[edge] + (corners[(edge + 1) % 4] - corners[edge]) * (i / 10f));
+            session.AddPoint(corners[0]); Assert.IsTrue(session.FinishStroke());
+            Assert.IsFalse(session.AcceptPending());
+            Assert.AreEqual(2, session.Pending.Count); Assert.AreEqual(0, session.Accepted.Count);
+            foreach (RegionData region in session.Pending)
+            {
+                Assert.AreEqual(1, region.Scale); Assert.AreEqual(Vector2.zero, region.Destination);
+                Assert.IsFalse(region.HasPlacement);
+            }
+            Assert.LessOrEqual(session.LastPlacementAttempts, 26);
+        }
+        [Test] public void ClosureReadyUsesExactSampleAndDiagonalThresholds()
+        {
+            var session = new RegionSession(); session.BeginTrigger(false);
+            for (int i = 0; i < 19; i++) session.AddPoint(new Vector2(i * 0.002f, 0));
+            Assert.IsFalse(session.IsClosureReady);
+            session.AddPoint(new Vector2(0, 0.04f)); Assert.IsTrue(session.IsClosureReady);
+            session.AddPoint(new Vector2(0, 0.05f)); Assert.IsFalse(session.IsClosureReady);
+            session.CancelStroke(); Assert.IsFalse(session.IsClosureReady);
+        }
+        [Test] public void SampleOverflowCancelsAndNextTriggerCanRestart()
+        {
+            var session = new RegionSession(); session.BeginTrigger(false);
+            for (int i = 0; i < 512; i++) session.AddPoint(new Vector2((i % 2) * 0.01f, 0));
+            Assert.IsTrue(session.IsDrawing); Assert.IsFalse(session.StrokeOverflowed);
+            session.AddPoint(new Vector2(0, 0.01f));
+            Assert.IsFalse(session.IsDrawing); Assert.AreEqual(0, session.Stroke.Count);
+            Assert.IsTrue(session.StrokeOverflowed); Assert.IsFalse(session.FinishStroke());
+            session.BeginTrigger(false); session.AddPoint(Vector2.zero);
+            Assert.IsFalse(session.StrokeOverflowed); Assert.AreEqual(1, session.Stroke.Count);
+        }
+        [Test] public void BlockedMovementFeedbackHasAnIntervalAndStopsImmediately()
+        {
+            var feedback = new InteractionFeedback();
+            Assert.IsTrue(feedback.TryReject(10));
+            Assert.IsFalse(feedback.TryReject(10.1f));
+            Assert.IsFalse(feedback.TryReject(10.5f));
+            Assert.IsTrue(feedback.TryReject(10.8f));
+            feedback.BeginPulse(11, 0.1f);
+            Assert.IsTrue(feedback.IsPulsing(11.05f));
+            Assert.IsFalse(feedback.IsPulsing(11.2f));
+            feedback.BeginPulse(12, 0.1f); feedback.Stop();
+            Assert.IsFalse(feedback.IsPulsing(12.01f));
+            Assert.IsFalse(feedback.TryReject(float.NaN));
         }
         [Test] public void ResizePreservesPolygonCenterAndShape()
         {
@@ -96,7 +165,7 @@ namespace GazeShift.Tests
             session.AddPoint(new Vector2(-0.64f, -0.39f));
             Assert.IsTrue(session.FinishStroke());
             Assert.IsFalse(session.AcceptPending());
-            Assert.LessOrEqual(session.LastPlacementAttempts, 52);
+            Assert.LessOrEqual(session.LastPlacementAttempts, 13);
             Assert.AreEqual(1, session.Pending.Count); Assert.AreEqual(0, session.Accepted.Count);
         }
         [Test] public void DenseConvexAndConcaveStrokesStillAcceptExactCopies()
@@ -107,7 +176,7 @@ namespace GazeShift.Tests
                 double angle = i * Math.PI * 2 / 480;
                 circle.AddPoint(new Vector2((float)Math.Cos(angle) * 0.16f, (float)Math.Sin(angle) * 0.16f));
             }
-            Assert.IsTrue(circle.FinishStroke()); Assert.IsTrue(circle.AcceptPending());
+            Assert.IsTrue(circle.FinishStroke()); Assert.IsTrue(circle.AcceptPending(), "Dense circle must still fit at scale1");
             Assert.AreEqual(480, circle.Accepted[0].Source.Length);
             Assert.IsFalse(RegionGeometry.Overlaps(circle.Accepted[0].Source, circle.Accepted[0].DestinationPolygon()));
             var concave = new RegionSession(); concave.BeginTrigger(false);
@@ -115,9 +184,25 @@ namespace GazeShift.Tests
             for (int edge = 0; edge < corners.Length; edge++)
                 for (int i = 0; i < 80; i++) concave.AddPoint(corners[edge] + (corners[(edge + 1) % corners.Length] - corners[edge]) * (i / 80f));
             concave.AddPoint(corners[0]);
-            Assert.IsTrue(concave.FinishStroke()); Assert.IsTrue(concave.AcceptPending());
+            Assert.IsTrue(concave.FinishStroke()); Assert.IsTrue(concave.AcceptPending(), "Dense concave region must still fit at scale1");
             Assert.AreEqual(480, concave.Accepted[0].Source.Length);
             Assert.IsFalse(RegionGeometry.Overlaps(concave.Accepted[0].Source, concave.Accepted[0].DestinationPolygon()));
+        }
+        [Test] public void DenseLargeCircleFindsValidScaleOneCornerWithinBudget()
+        {
+            var session = new RegionSession(); session.BeginTrigger(false);
+            for (int i = 0; i <= 480; i++)
+            {
+                double angle = i * Math.PI * 2 / 480;
+                session.AddPoint(new Vector2((float)Math.Cos(angle) * 0.22f, (float)Math.Sin(angle) * 0.22f));
+            }
+            Assert.IsTrue(session.FinishStroke()); Assert.IsTrue(session.AcceptPending());
+            RegionData region = session.Accepted[0];
+            Assert.AreEqual(480, region.Source.Length); Assert.AreEqual(1, region.Scale);
+            Assert.LessOrEqual(session.LastPlacementAttempts, 13);
+            Assert.IsFalse(RegionGeometry.Overlaps(region.Source, region.DestinationPolygon()));
+            Assert.AreEqual(0.425f, Math.Abs(region.Destination.x), 0.00001f);
+            Assert.AreEqual(0.175f, Math.Abs(region.Destination.y), 0.00001f);
         }
         private static void DrawCircle(RegionSession session, Vector2 center)
         {

@@ -69,8 +69,13 @@ namespace GazeShift
         }
         public void Dispose()
         {
-            Object.Destroy(sourceObject); Object.Destroy(copyObject);
-            Object.Destroy(sourceMesh); Object.Destroy(copyMesh);
+            DestroyOwned(sourceObject); DestroyOwned(copyObject);
+            DestroyOwned(sourceMesh); DestroyOwned(copyMesh);
+        }
+        private static void DestroyOwned(Object resource)
+        {
+            if (resource == null) return;
+            if (Application.isPlaying) Object.Destroy(resource); else Object.DestroyImmediate(resource);
         }
         private static Mesh CreateMesh(Vector3[] vertices, int[] triangles)
         {

@@ -1,0 +1,9 @@
+# Simulated accessibility feedback updates
+
+This is a prototype response to three hypothetical reviews, not research with people or clinical validation. Keep automatic passthrough startup, controller drawing, live source blur and independent sharp copies. The only headset text surfaces remain short instructions and Accept regions.
+
+Implement: B undoes newest pending, otherwise newest accepted; accept selects newest copy; scale-1 initial placement tries bounded candidates nearest canvas center without automatic shrinking; left stick moves both HUD elements within visible bounds even before camera readiness; hold left X hides effects and cancels gestures, release requires fresh valid coverage; brief haptics acknowledge acceptance/closure and rate-limit rejection; source grip has zero offset, copy grip preserves offset; high-contrast layered outlines, endpoint/start ring, larger backed instruction text; explicit 512-sample overflow instruction. Retain exact 20-sample/0.03-diagonal closure and collision-work limits.
+
+Rejected movement keeps the last valid placement. Error instructions persist until the relevant action succeeds. Suspend/pause/focus/tracking loss clears effects and vibration. Undo and teardown dispose app-owned resources, including native editor lifecycles. No disease presets, eye tracking, AI, TTS, diagnosis, or claimed measured accessibility benefit.
+
+Verification: tests first for state/placement/closure/overflow/HUD bounds and rejection gating; native EditMode tests for UI hit priority, peek freshness, selected outline and resource cleanup. Hardware comfort, visual usability and haptic feel remain unverified.

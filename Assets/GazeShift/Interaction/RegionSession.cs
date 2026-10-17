@@ -44,11 +44,14 @@ namespace GazeShift
         public const float MaximumScale = 2;
         public const float SampleSpacing = 0.001f;
         private const float PlacementGap = 0.005f;
-        private const int MaximumPlacementCandidates = 52;
+        private const int MaximumPlacementCandidates = 13;
         private const int MaximumAcceptanceChecks = 32768;
         private int remainingAcceptanceChecks;
         public static readonly Vector2 CanvasHalfExtent = new Vector2(0.65f, 0.4f);
         public bool IsDrawing { get; private set; }
+        public bool IsClosureReady => IsDrawing && Stroke.Count >= MinimumSamples &&
+            (Stroke[0] - Stroke[Stroke.Count - 1]).magnitude <= (CanvasHalfExtent * 2).magnitude * ClosureDiagonalFraction;
+        public bool StrokeOverflowed { get; private set; }
         internal int LastPlacementAttempts { get; private set; }
         public readonly List<Vector2> Stroke = new List<Vector2>();
         public readonly List<RegionData> Pending = new List<RegionData>();
@@ -56,20 +59,21 @@ namespace GazeShift
 
         public void BeginTrigger(bool hitAccept)
         {
-            CancelStroke();
+            CancelStroke(); StrokeOverflowed = false;
             if (!hitAccept) IsDrawing = true;
         }
         public void AddPoint(Vector2 point)
         {
             if (!IsDrawing || !RegionGeometry.IsFinite(point) || !InsideCanvas(point)) return;
-            if (Stroke.Count == MaximumSamples) { CancelStroke(); return; }
-            if (Stroke.Count == 0 || (point - Stroke[Stroke.Count - 1]).sqrMagnitude >= SampleSpacing * SampleSpacing) Stroke.Add(point);
+            if (Stroke.Count > 0 && (point - Stroke[Stroke.Count - 1]).sqrMagnitude < SampleSpacing * SampleSpacing) return;
+            if (Stroke.Count == MaximumSamples) { CancelStroke(); StrokeOverflowed = true; return; }
+            Stroke.Add(point);
         }
         public void CancelStroke() { IsDrawing = false; Stroke.Clear(); }
         public bool FinishStroke()
         {
             bool valid = false;
-            if (IsDrawing && Stroke.Count >= MinimumSamples && (Stroke[0] - Stroke[Stroke.Count - 1]).magnitude <= (CanvasHalfExtent * 2).magnitude * ClosureDiagonalFraction &&
+            if (IsClosureReady &&
                 RegionGeometry.TryTriangulate(Stroke, out Vector2[] vertices, out int[] indices) && vertices.Length >= MinimumSamples)
             {
                 bool coversCopy = false;
@@ -80,18 +84,35 @@ namespace GazeShift
             CancelStroke();
             return valid;
         }
-        public void UndoPending()
+        public RegionData UndoLast()
         {
             CancelStroke();
-            if (Pending.Count > 0) Pending.RemoveAt(Pending.Count - 1);
+            List<RegionData> regions = Pending.Count > 0 ? Pending : Accepted;
+            if (regions.Count == 0) return null;
+            RegionData removed = regions[regions.Count - 1];
+            regions.RemoveAt(regions.Count - 1);
+            return removed;
         }
         public bool AcceptPending()
         {
             CancelStroke(); LastPlacementAttempts = 0; remainingAcceptanceChecks = MaximumAcceptanceChecks;
+            var originalDestinations = new Vector2[Pending.Count];
+            var originalScales = new float[Pending.Count];
+            var originalPlacements = new bool[Pending.Count];
+            for (int i = 0; i < Pending.Count; i++)
+            {
+                originalDestinations[i] = Pending[i].Destination; originalScales[i] = Pending[i].Scale;
+                originalPlacements[i] = Pending[i].HasPlacement;
+            }
             for (int i = 0; i < Pending.Count; i++) Pending[i].HasPlacement = false;
             for (int i = 0; i < Pending.Count; i++) if (!FindInitialDestination(Pending[i]))
             {
-                for (int j = 0; j < Pending.Count; j++) Pending[j].HasPlacement = false;
+                for (int j = 0; j < Pending.Count; j++)
+                {
+                    RegionData region = Pending[j];
+                    region.Destination = originalDestinations[j]; region.Scale = originalScales[j]; region.HasPlacement = originalPlacements[j];
+                    for (int k = 0; k < region.CopyBoundary.Length; k++) region.CopyBoundary[k] = region.HasPlacement ? region.CopyPoint(k) : Vector2.zero;
+                }
                 return false;
             }
             Accepted.AddRange(Pending); Pending.Clear();
@@ -99,30 +120,25 @@ namespace GazeShift
         }
         private bool FindInitialDestination(RegionData region)
         {
-            int firstAttempt = LastPlacementAttempts;
             // Candidates touch source or canvas bounds; exact polygon checks decide validity.
             // shortcut: boundary candidates and a finite work budget can reject tight concave packing; upgrade to incremental free-space search if needed.
-            for (float scale = 1; scale >= MinimumScale; scale -= MinimumScale)
+            Vector2 sourceOffset = region.SourceHalfExtent * 2 + Vector2.one * PlacementGap;
+            var candidates = new Vector2[MaximumPlacementCandidates];
+            for (int side = 0; side < 4; side++)
             {
-                Vector2 half = region.SourceHalfExtent * scale;
-                Vector2 sourceOffset = region.SourceHalfExtent + half + Vector2.one * PlacementGap;
-                for (int side = 0; side < 4; side++)
-                {
-                    Vector2 offset = side < 2 ? new Vector2((side == 0 ? -1 : 1) * sourceOffset.x, 0) : new Vector2(0, (side == 2 ? -1 : 1) * sourceOffset.y);
-                    LastPlacementAttempts++;
-                    if (TryPlace(region, region.SourceCenter + offset, scale, ref remainingAcceptanceChecks)) return true;
-                    if (remainingAcceptanceChecks == 0) return false;
-                }
-                Vector2 range = CanvasHalfExtent - half - Vector2.one * PlacementGap;
-                if (range.x < 0 || range.y < 0) continue;
-                for (int y = 0; y < 3; y++)
-                    for (int x = 0; x < 3; x++)
-                    {
-                        if (LastPlacementAttempts - firstAttempt >= MaximumPlacementCandidates) return false;
-                        LastPlacementAttempts++;
-                        if (TryPlace(region, new Vector2((x - 1) * range.x, (1 - y) * range.y), scale, ref remainingAcceptanceChecks)) return true;
-                        if (remainingAcceptanceChecks == 0) return false;
-                    }
+                Vector2 offset = side < 2 ? new Vector2((side == 0 ? -1 : 1) * sourceOffset.x, 0) : new Vector2(0, (side == 2 ? -1 : 1) * sourceOffset.y);
+                candidates[side] = region.SourceCenter + offset;
+            }
+            Vector2 range = CanvasHalfExtent - region.SourceHalfExtent - Vector2.one * PlacementGap;
+            for (int y = 0; y < 3; y++)
+                for (int x = 0; x < 3; x++) candidates[4 + y * 3 + x] = new Vector2((x - 1) * Math.Max(0, range.x), (y - 1) * Math.Max(0, range.y));
+            // Center-first is a convenience default, not a prescription for any visual field.
+            Array.Sort(candidates, (left, right) => left.sqrMagnitude.CompareTo(right.sqrMagnitude));
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                LastPlacementAttempts++;
+                if (TryPlace(region, candidates[i], 1, ref remainingAcceptanceChecks)) return true;
+                if (remainingAcceptanceChecks == 0) return false;
             }
             return false;
         }
