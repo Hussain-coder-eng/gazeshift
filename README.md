@@ -31,7 +31,7 @@ The CLI launches the pinned editor and manages batch/quit flags. A direct editor
 
 ```sh
 Unity -batchmode -nographics -quit -projectPath "$PWD" -executeMethod GazeShift.Editor.QuestProjectSetup.Configure
-Unity -batchmode -nographics -projectPath "$PWD" -runTests -testPlatform EditMode -testResults test-results.xml
+Unity -batchmode -projectPath "$PWD" -runTests -testPlatform EditMode -testResults test-results.xml
 Unity -batchmode -nographics -quit -projectPath "$PWD" -executeMethod GazeShift.Editor.QuestProjectSetup.BuildAndroid
 ```
 
@@ -41,7 +41,7 @@ The manual GitHub Actions workflow requires repository Unity license credentials
 
 ## Verification and limits
 
-Local verification on October 17, 2026: Unity 6000.4.1f1 imported and compiled the project; all **52 EditMode tests passed**, including repeatable XR/scene setup, UI resource cleanup, camera freshness, and forced desktop Metal shader compilation. The exact Configure batch entry point succeeded. The Android build attempt stopped at the explicit missing Android Build Support/SDK/NDK/OpenJDK gate, so no APK or headset interaction is verified. GitHub Actions has not run.
+Local verification on October 17, 2026: Unity 6000.4.1f1 imported and compiled the project; all **58 EditMode tests passed**, including repeatable XR/scene setup, UI resource cleanup, camera freshness, and forced desktop Metal shader compilation. The exact Configure batch entry point succeeded. The Android build attempt stopped at the explicit missing Android Build Support/SDK/NDK/OpenJDK gate, so no APK or headset interaction is verified. GitHub Actions has not run.
 
 Tests cover concave polygon triangulation, winding, invalid strokes, overlap/bounds rejection, scale limits, controller action priority, camera projection failure, and camera freshness recovery. Tests and compilation cannot verify headset alignment or physical interaction.
 
