@@ -8,5 +8,6 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/GazeShift/Scenes/GazeShift.unity
     guid: c1b2f8343a2240b0bc864313b29f74a0
-  m_configObjects: {}
-  m_UseUCBPForAssetBundles: 0
+  m_configObjects:
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: d375daaa54f52453088906b7759fdd2b, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: ba557bf71890143e8949e641f59bd8ae, type: 2}

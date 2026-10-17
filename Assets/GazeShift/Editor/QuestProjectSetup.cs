@@ -7,6 +7,7 @@ using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEditor.XR.Management;
 using UnityEditor.XR.Management.Metadata;
+using UnityEditor.XR.OpenXR.Features;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.XR.Management;
@@ -28,6 +29,7 @@ namespace GazeShift.Editor
         {
             PlayerSettings.companyName = "GazeShift";
             PlayerSettings.productName = "GazeShift";
+            PlayerSettings.SplashScreen.show = false;
             PlayerSettings.bundleVersion = "0.1.0";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.gazeshift.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -83,7 +85,7 @@ namespace GazeShift.Editor
             if (!XRPackageMetadataStore.AssignLoader(general.Manager,
                 "UnityEngine.XR.OpenXR.OpenXRLoader", BuildTargetGroup.Android))
                 throw new InvalidOperationException("Could not enable the Android OpenXR loader.");
-            var openXr = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
+            var openXr = GetAndroidOpenXrSettings();
             openXr.renderMode = OpenXRSettings.RenderMode.SinglePassInstanced;
             EnableFeature<MetaQuestFeature>(openXr);
             EnableFeature<MetaXRFeature>(openXr);
@@ -92,6 +94,41 @@ namespace GazeShift.Editor
             EditorUtility.SetDirty(general);
             EditorUtility.SetDirty(general.Manager);
             EditorUtility.SetDirty(openXr);
+        }
+
+        private static OpenXRSettings GetAndroidOpenXrSettings()
+        {
+            FeatureHelpers.RefreshFeatures(BuildTargetGroup.Android);
+            var settings = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
+            if (settings != null) return settings;
+            if (!EditorBuildSettings.TryGetConfigObject(Constants.k_SettingsKey, out UnityEngine.Object package))
+                throw new InvalidOperationException("Could not create the OpenXR settings container.");
+
+            // OpenXR 1.16 refuses to create Android settings when Android Build Support is absent.
+            var serialized = new SerializedObject(package);
+            SerializedProperty keys = serialized.FindProperty("Keys");
+            SerializedProperty values = serialized.FindProperty("Values");
+            if (keys == null || values == null || keys.arraySize != values.arraySize)
+                throw new InvalidOperationException("The pinned OpenXR settings format has changed.");
+            settings = ScriptableObject.CreateInstance<OpenXRSettings>();
+            settings.name = "Android";
+            AssetDatabase.AddObjectToAsset(settings, package);
+            int index = 0;
+            while (index < keys.arraySize && keys.GetArrayElementAtIndex(index).intValue != (int)BuildTargetGroup.Android)
+                index++;
+            if (index == keys.arraySize)
+            {
+                keys.InsertArrayElementAtIndex(index);
+                values.InsertArrayElementAtIndex(index);
+            }
+            keys.GetArrayElementAtIndex(index).intValue = (int)BuildTargetGroup.Android;
+            values.GetArrayElementAtIndex(index).objectReferenceValue = settings;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            ((ISerializationCallbackReceiver)package).OnAfterDeserialize();
+            EditorUtility.SetDirty(package);
+            FeatureHelpers.RefreshFeatures(BuildTargetGroup.Android);
+            return OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android)
+                ?? throw new InvalidOperationException("Could not register Android OpenXR settings.");
         }
 
         private static void EnableFeature<T>(OpenXRSettings settings)
@@ -122,7 +159,7 @@ namespace GazeShift.Editor
         {
             Configure();
             if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Android, BuildTarget.Android))
-                throw new BuildFailedException("Install Android Build Support, SDK, NDK, and OpenJDK for Unity 6000.3.19f1.");
+                throw new BuildFailedException($"Install Android Build Support, SDK, NDK, and OpenJDK for Unity {Application.unityVersion}.");
             string output = Environment.GetEnvironmentVariable("GAZESHIFT_APK_PATH") ?? DefaultApkPath;
             if (string.IsNullOrWhiteSpace(output) || Path.GetExtension(output) != ".apk")
                 throw new BuildFailedException("GAZESHIFT_APK_PATH must name an .apk file.");

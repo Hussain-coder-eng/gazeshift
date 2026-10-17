@@ -1,6 +1,6 @@
 # GazeShift project context
 
-The active platform is **Meta Quest 3S / Quest 3**, implemented in Unity C# with Meta XR Core and MR Utility Kit. The [migration design](docs/superpowers/specs/2026-10-17-quest-3s-migration-design.md) is the maintained requirement; the [README](README.md) contains setup and controls.
+The active platform is **Meta Quest 3S / Quest 3**, implemented in Unity 6000.4.1f1 C# with Meta XR Core/MR Utility Kit 85 and OpenXR 1.16.1. The [migration design](docs/superpowers/specs/2026-10-17-quest-3s-migration-design.md) and [accessibility updates](docs/superpowers/specs/2026-10-17-accessibility-updates.md) are the maintained requirements; the [README](README.md) contains setup and controls.
 
 The app starts in full-color passthrough, accepts multiple controller-drawn polygons, blurs their original live camera image, and displays separate sharp live copies dragged with grip and resized with the right thumbstick. Regions are head-relative at a one-meter plane. Only instructions and **Accept regions** appear in the headset. No front setup, gaze tracking, diagnostics panel, cloud backend, or model inference belongs in this flow.
 

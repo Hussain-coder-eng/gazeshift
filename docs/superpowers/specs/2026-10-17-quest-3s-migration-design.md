@@ -9,17 +9,19 @@ The user requested the complete migration and GitHub commit/push. The Gang uses 
 ## Interaction
 
 - Passthrough starts automatically. Keep only short instructions and the floating **Accept regions** button as on-screen text; route diagnostics to logs. Permission/source errors are actionable instructions in that same instruction surface.
-- Draw on a head-relative plane one meter ahead. Hold the right trigger and move the controller ray to accumulate a visible polygon outline; release closes a valid stroke. Trigger hit-testing checks the Accept button before starting a stroke. The right A button also accepts; B undoes the latest unaccepted region.
+- Draw on a head-relative plane one meter ahead. Hold the right trigger and move the controller ray to accumulate a visible polygon outline; release closes a valid stroke. Trigger hit-testing checks the Accept button before starting a stroke. The right A button also accepts; B undoes the newest unaccepted region, or the newest accepted region when none are pending.
 - Support multiple independent regions. Acceptance freezes their source polygons in head-relative coordinates, preserving the old screen-fixed intent. Source polygons do not follow the eyes or world objects.
 - Grip and point at an accepted source region or copy to select and drag its sharp copy. Right-thumbstick vertical motion resizes the selected copy about its center. The source mask stays in place. Keep the last valid destination when a new drag/resize would leave the canvas or overlap a source region.
 - The sharp copy uses the original live camera texture, never the blurred overlay or another copy. Apply a live blur only inside each accepted source polygon. Preserve the drawn polygon instead of replacing it with the old bounding ellipse. Destination copies cover real destination content.
 - Camera loss, denied permission, or app suspension removes blur/copy effects; passthrough and actionable instructions remain. A fresh camera frame is required before effects resume. If any source vertex cannot project into the sampled camera image, hide both source blur and its copy. Never display a frozen camera patch as live.
 
+The [simulated accessibility updates](2026-10-17-accessibility-updates.md) extend this baseline with controller feedback, HUD movement, original-view peek, and undo after acceptance.
+
 ## Engineering decisions
 
 These are implementation choices made by the Gang, rather than additional user requirements.
 
-- Unity **6000.3.19f1**, Meta XR Core and MR Utility Kit **85.0.0**, OpenXR **1.15.1**, XR Management **4.5.4**. Use the official Meta registry `https://npm.developer.oculus.com` with scope `com.meta`. MRUK's `Meta.XR.PassthroughCameraAccess` supplies an actual live RGB camera texture and calibrated `WorldToViewportPoint` projection. Passthrough rendering alone does not expose image pixels.
+- Unity **6000.4.1f1**, Meta XR Core and MR Utility Kit **85.0.0**, OpenXR **1.16.1**, XR Management **4.5.4**. Use the official Meta registry `https://npm.developer.oculus.com` with scope `com.meta`. MRUK's `Meta.XR.PassthroughCameraAccess` supplies an actual live RGB camera texture and calibrated `WorldToViewportPoint` projection. Passthrough rendering alone does not expose image pixels.
 - Use an `OVRCameraRig`, controller input, and a background `OVRPassthroughLayer`; no backend, account flow, models, or custom camera capture plugin. Camera access requires the supported Quest OS/API and user permission. Project configuration and docs state the actual requirement.
 - The runtime lives in namespace `GazeShift`. `ICameraFrameSource` exposes `bool IsReady { get; }`, `Texture FrameTexture { get; }`, and `bool TryWorldToTextureUv(Vector3 worldPoint, out Vector2 uv)`. `QuestCameraSource` implements it with MRUK. `RegionInteraction.Initialize(ICameraFrameSource source, Transform centerEye)` consumes it and creates all drawing/region/controller UI state.
 - Recalculate source-camera UVs for the source polygon's world positions each frame. A patch's display transform changes its destination vertices, never its source sampling coordinates. This is a camera-calibrated image overlay at a fixed plane, not reconstructed scene geometry or medically validated binocular registration.

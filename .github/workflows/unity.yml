@@ -25,7 +25,7 @@ jobs:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
-          unityVersion: 6000.3.19f1
+          unityVersion: 6000.4.1f1
           testMode: EditMode
           artifactsPath: TestResults
           githubToken: ${{ secrets.GITHUB_TOKEN }}

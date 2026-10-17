@@ -4,17 +4,18 @@ A manual mixed-reality image-relocation experiment. Draw polygons with the right
 
 ## Controls
 
-1. Hold the right trigger and trace a closed loop. Release near the start. Repeat for more regions; B undoes the latest unaccepted region.
+1. Hold the right trigger and trace a closed loop. Release near the start. Repeat for more regions; B undoes the newest unaccepted region, or the newest accepted region when none are pending.
 2. Point at **Accept regions** and press the trigger, or press A.
-3. Point at an accepted region or copy and hold grip to move its sharp copy. Move the right thumbstick up/down to resize the selected copy.
+3. Point at an accepted region or copy and hold grip to move its sharp copy. Move the right thumbstick up/down to resize the selected copy. Accepting regions selects the newest copy.
+4. Move the left thumbstick to reposition the instructions and Accept button. Hold left X to peek at the original view; release to restore effects after fresh camera coverage returns.
 
 Source regions stay fixed relative to the headset. Invalid copies outside the working area or over a source region retain their last valid placement. Camera loss removes blur/copies until fresh imagery returns. Only instructions and **Accept regions** appear as text; diagnostics stay in logs.
 
 ## Setup and build
 
-Use **Unity 6000.3.19f1**, Android Build Support with SDK/NDK and OpenJDK, an active Unity license, and **Quest 3 or Quest 3S with Horizon OS v81 or newer**. An Intel editor on Apple Silicon also needs Rosetta. Grant headset camera permission when asked.
+Use **Unity 6000.4.1f1**, Android Build Support with SDK/NDK and OpenJDK, an active Unity license, and **Quest 3 or Quest 3S with Horizon OS v81 or newer**. Use the native ARM64 editor on Apple Silicon. Grant headset camera permission when asked.
 
-Open the repository root as a Unity project. Versions are pinned: Meta XR Core/MRUK **85.0.0**, OpenXR **1.15.1**, XR Management **4.5.4**. Packages resolve through Unity's registry and the official Meta registry.
+Open the repository root as a Unity project. Versions are pinned: Meta XR Core/MRUK **85.0.0**, OpenXR **1.16.1**, XR Management **4.5.4**. Packages resolve through Unity's registry and the official Meta registry.
 
 Choose **GazeShift → Configure Quest project** to regenerate the scene, Android/OpenXR settings, camera permission configuration, and required shader inclusion. Choose **GazeShift → Build Quest APK** to build Android ARM64 IL2CPP to `Builds/GazeShift.apk`. `GAZESHIFT_APK_PATH` may override the APK output path.
 
@@ -34,13 +35,19 @@ Unity -batchmode -nographics -projectPath "$PWD" -runTests -testPlatform EditMod
 Unity -batchmode -nographics -quit -projectPath "$PWD" -executeMethod GazeShift.Editor.QuestProjectSetup.BuildAndroid
 ```
 
+Configuration also works without the Android module, so committed XR settings can be inspected and tested. Building an APK requires the Android module and its SDK/NDK/OpenJDK toolchain.
+
 The manual GitHub Actions workflow requires repository Unity license credentials; their presence is not assumed. Never commit license files, signing keys, captured images, or APKs.
 
 ## Verification and limits
 
+Local verification on October 17, 2026: Unity 6000.4.1f1 imported and compiled the project; all **52 EditMode tests passed**, including repeatable XR/scene setup, UI resource cleanup, camera freshness, and forced desktop Metal shader compilation. The exact Configure batch entry point succeeded. The Android build attempt stopped at the explicit missing Android Build Support/SDK/NDK/OpenJDK gate, so no APK or headset interaction is verified. GitHub Actions has not run.
+
 Tests cover concave polygon triangulation, winding, invalid strokes, overlap/bounds rejection, scale limits, controller action priority, camera projection failure, and camera freshness recovery. Tests and compilation cannot verify headset alignment or physical interaction.
 
 Headset acceptance: launch straight into passthrough; grant/deny camera access; draw multiple regions; select Accept using the controller; verify source-only live blur; drag/resize live sharp copies; move the head; suspend/resume and interrupt camera input. Report which checks actually ran. An APK build is separate from installation and this interaction sequence.
+
+The [simulated accessibility scenarios](docs/ACCESSIBILITY_SCENARIOS.md) explain the controller feedback and visual cues. These are hypothetical reviews, not feedback collected from people or measured accessibility results.
 
 The app duplicates camera pixels and covers destination content. Its head-relative masks are assumed regions, not retinal measurements. Camera coverage is smaller than headset passthrough, so effects disappear where source pixels cannot be sampled. The fixed plane is not scene reconstruction or validated binocular registration. No diagnosis, treatment, vision benefit, clinical result, measured latency, or frame-rate claim is established.
 

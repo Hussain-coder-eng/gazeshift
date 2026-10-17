@@ -6,7 +6,7 @@
 
 **Architecture:** A Meta SDK camera adapter feeds a narrow live-frame/projection interface. The interaction layer owns head-relative polygons, controller hit-testing, GPU blur and sharp copies; a deterministic Editor setup creates the rig/scene and build configuration.
 
-**Tech Stack:** Unity 6000.3.19f1, C#, Meta XR Core/MRUK 85.0.0, OpenXR 1.15.1, XR Management 4.5.4, Android ARM64 IL2CPP.
+**Tech Stack:** Unity 6000.4.1f1, C#, Meta XR Core/MRUK 85.0.0, OpenXR 1.16.1, XR Management 4.5.4, Android ARM64 IL2CPP.
 
 **Spec:** `docs/superpowers/specs/2026-10-17-quest-3s-migration-design.md`
 
@@ -16,7 +16,7 @@
 - Only short instructions and **Accept regions** may appear as text in the headset.
 - Right trigger draws/hits UI; A accepts; B undoes an unaccepted region; grip drags; right thumbstick resizes.
 - Multiple head-relative polygon regions; original live pixels feed both blur and sharp copy.
-- Unity 6000.3.19f1; Meta Core/MRUK 85.0.0; OpenXR 1.15.1; XR Management 4.5.4.
+- Unity 6000.4.1f1; Meta Core/MRUK 85.0.0; OpenXR 1.16.1; XR Management 4.5.4.
 - All writes on `feat-quest-3s-migration`; independent Superpowers review before authorized merge/push.
 - No headset evidence, clinical benefit, latency, or APK success may be inferred from a compile/test result.
 
