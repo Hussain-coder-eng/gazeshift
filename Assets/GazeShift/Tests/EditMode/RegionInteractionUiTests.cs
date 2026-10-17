@@ -157,6 +157,97 @@ namespace GazeShift.Tests
             }
             finally { DestroyInteraction(owner); UnityEngine.Object.DestroyImmediate(eye); UnityEngine.Object.DestroyImmediate(texture); }
         }
+        [Test] public void RightControllerLossKeepsAcceptedPairLiveAndCancelsGestures()
+        {
+            var owner = new GameObject("Controller loss UI test"); var eye = new GameObject("Test eye"); var texture = new Texture2D(2, 2);
+            try
+            {
+                var source = new LiveSource(texture);
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(source, eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); DrawCircle(session, new Vector2(-0.25f, 0));
+                Call(interaction, "AcceptRegions"); Call(interaction, "UpdateLiveRegions");
+                RegionData region = session.Accepted[0];
+                LiveRegionView view = Read<Dictionary<RegionData, LiveRegionView>>(interaction, "views")[region];
+                float originalUv = Read<Mesh>(view, "sourceMesh").uv[0].x;
+                Call(interaction, "BeginDrag", region.Destination); session.BeginTrigger(false); session.AddPoint(Vector2.zero);
+                Call(interaction, "UpdateStrokeOutline"); Write(interaction, "closureSignaled", true);
+                Read<LineRenderer>(interaction, "rayLine").enabled = true;
+                Call(interaction, "Pulse", 0.3f, 1f);
+                eye.transform.position = Vector3.right * 0.5f;
+
+                Assert.IsFalse((bool)Call(interaction, "UpdateAvailability", true, false, false));
+                Assert.IsTrue(view.IsVisible, "Resting the right controller must keep accepted imagery visible.");
+                Assert.AreEqual(originalUv + 0.05f, Read<Mesh>(view, "sourceMesh").uv[0].x, 0.00001f);
+                Assert.AreEqual(originalUv + 0.05f, Read<Mesh>(view, "copyMesh").uv[0].x, 0.00001f);
+                Assert.AreSame(region, Read<RegionData>(interaction, "selected")); Assert.AreEqual(1, session.Accepted.Count);
+                Assert.IsFalse(session.IsDrawing); Assert.IsFalse(Read<bool>(interaction, "dragging"));
+                Assert.IsNull(Read<RegionData>(interaction, "hovered")); Assert.IsFalse(Read<bool>(interaction, "closureSignaled"));
+                Assert.IsFalse(Read<bool>(interaction, "hapticsActive"));
+                Assert.IsFalse(Read<InteractionFeedback>(interaction, "feedback").IsPulsing(Time.unscaledTime));
+                foreach (LineRenderer line in eye.GetComponentsInChildren<LineRenderer>())
+                    if (line.gameObject.name.StartsWith("Current stroke") || line.gameObject.name.StartsWith("Stroke start ring") ||
+                        line.gameObject.name.StartsWith("Controller endpoint") || line.gameObject.name == "Right controller ray")
+                        Assert.IsFalse(line.enabled, line.gameObject.name);
+                StringAssert.Contains("Connect right controller", Read<TextMesh>(interaction, "instruction").text);
+                Assert.IsTrue((bool)Call(interaction, "UpdateAvailability", true, true, false));
+                Assert.IsFalse(session.IsDrawing); Assert.IsFalse(Read<bool>(interaction, "dragging"));
+                source.Covered = false;
+                Call(interaction, "UpdateAvailability", true, false, false);
+                AssertPairHiddenAndUnbound(view);
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
+        [Test] public void LeftOriginalViewAndHudRemainAvailableWithoutRightController()
+        {
+            var owner = new GameObject("Independent left input UI test"); var eye = new GameObject("Test eye"); var texture = new Texture2D(2, 2);
+            try
+            {
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new LiveSource(texture), eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); DrawCircle(session, new Vector2(-0.25f, 0));
+                Call(interaction, "AcceptRegions"); Call(interaction, "UpdateLiveRegions");
+                RegionData region = session.Accepted[0];
+                LiveRegionView view = Read<Dictionary<RegionData, LiveRegionView>>(interaction, "views")[region];
+                Assert.IsFalse((bool)Call(interaction, "UpdateAvailability", true, false, true));
+                Assert.IsTrue(Read<bool>(interaction, "originalView")); AssertPairHiddenAndUnbound(view);
+                Call(interaction, "MoveHud", new Vector2(0.1f, -0.1f));
+                Assert.AreEqual(0.1f, Read<Transform>(interaction, "hud").localPosition.x, 0.00001f);
+                Assert.IsFalse((bool)Call(interaction, "UpdateAvailability", true, false, false));
+                Assert.IsFalse(Read<bool>(interaction, "originalView")); Assert.IsTrue(view.IsVisible);
+                Assert.AreSame(region, Read<RegionData>(interaction, "selected"));
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
+        [TestCase("head")] [TestCase("camera")] [TestCase("focus")] [TestCase("pause")]
+        public void InvalidLiveViewStillHidesBothMeshesAndClearsBindings(string unavailable)
+        {
+            var owner = new GameObject("View validity UI test"); var eye = new GameObject("Test eye"); var texture = new Texture2D(2, 2);
+            try
+            {
+                var source = new LiveSource(texture);
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(source, eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); DrawCircle(session, new Vector2(-0.25f, 0));
+                Call(interaction, "AcceptRegions"); Call(interaction, "UpdateLiveRegions");
+                LiveRegionView view = Read<Dictionary<RegionData, LiveRegionView>>(interaction, "views")[session.Accepted[0]];
+                Assert.IsTrue(view.IsVisible);
+                if (unavailable == "camera") source.Ready = false;
+                if (unavailable == "focus") Write(interaction, "focused", false);
+                if (unavailable == "pause") Write(interaction, "paused", true);
+                Assert.IsFalse((bool)Call(interaction, "UpdateAvailability", unavailable != "head", false, false));
+                AssertPairHiddenAndUnbound(view); Assert.IsNull(Read<RegionData>(interaction, "selected"));
+                Assert.IsFalse(Read<bool>(interaction, "hapticsActive")); Assert.AreEqual(1, session.Accepted.Count);
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
+        private static void AssertPairHiddenAndUnbound(LiveRegionView view)
+        {
+            foreach (string field in new[] { "sourceObject", "copyObject" })
+            {
+                MeshRenderer renderer = Read<GameObject>(view, field).GetComponent<MeshRenderer>();
+                var properties = new MaterialPropertyBlock(); renderer.GetPropertyBlock(properties);
+                Assert.IsFalse(renderer.enabled); Assert.IsNull(properties.GetTexture("_MainTex"));
+            }
+        }
+        private static void Write(object owner, string field, object value) => owner.GetType().GetField(field, BindingFlags.Instance | BindingFlags.NonPublic).SetValue(owner, value);
         private static void DestroyInteraction(GameObject owner)
         {
             if (owner == null) return;

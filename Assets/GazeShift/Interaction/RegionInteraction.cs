@@ -108,22 +108,9 @@ namespace GazeShift
                 Vector2 stick = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.LTouch);
                 if (stick.sqrMagnitude > StickDeadzone * StickDeadzone) MoveHud(stick * HudSpeed * Time.unscaledDeltaTime);
             }
-            if (controller == null || paused || !focused || !HeadTracked() || !ControllerTracked())
-            {
-                SuspendInteraction();
-                SetInstruction(paused || !focused ? "Keep GazeShift open; wait for camera." : "Wear headset; connect right controller.\nLeft stick: move this panel.");
-                return;
-            }
-            SetOriginalView(OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.LTouch));
-            if (originalView) { SetInstruction("Original view: release left X to return.\nLeft stick: move this panel."); return; }
+            if (!UpdateAvailability(HeadTracked(), controller != null && ControllerTracked(), OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.LTouch))) return;
             Ray ray = new Ray(controller.position, controller.forward);
             bool canvasHit = TryCanvasHit(ray, out Vector2 hit);
-            if (!source.IsReady || source.FrameTexture == null)
-            {
-                SuspendInteraction();
-                SetInstruction((source is QuestCameraSource quest ? quest.StatusInstruction : "Allow camera access in Quest settings; reopen GazeShift.") + "\nLeft stick: move this panel.");
-                return;
-            }
             rayLine.enabled = true; rayLine.positionCount = 2;
             rayLine.SetPosition(0, ray.origin);
             rayLine.SetPosition(1, canvasHit ? plane.TransformPoint(new Vector3(hit.x, hit.y, 0)) : ray.GetPoint(CanvasDistance));
@@ -131,6 +118,37 @@ namespace GazeShift
             bool allCovered = UpdateLiveRegions();
             UpdateStrokeOutline(); UpdateRing(endpoint, canvasHit, hit, 0.009f, OutlineWidth);
             SetInstruction(!allCovered ? CoverageInstruction : actionInstruction ?? (Time.unscaledTime < instructionUntil ? temporaryInstruction : StageInstruction()));
+        }
+
+        private bool UpdateAvailability(bool headTracked, bool rightControllerTracked, bool showOriginal)
+        {
+            if (paused || !focused || !headTracked)
+            {
+                SuspendInteraction();
+                SetInstruction(paused || !focused ? "Keep GazeShift open; wait for camera." : "Wear headset to resume the live view.\nLeft stick: move this panel.");
+                return false;
+            }
+            if (!source.IsReady || source.FrameTexture == null)
+            {
+                SuspendInteraction();
+                SetInstruction((source is QuestCameraSource quest ? quest.StatusInstruction : "Allow camera access in Quest settings; reopen GazeShift.") + "\nLeft stick: move this panel.");
+                return false;
+            }
+            if (!rightControllerTracked)
+            {
+                session.CancelStroke(); hovered = null; dragging = false; closureSignaled = false;
+                StopHaptics(); UpdateStrokeOutline(); endpoint.SetEnabled(false); rayLine.enabled = false;
+            }
+            SetOriginalView(showOriginal);
+            if (originalView) { SetInstruction("Original view: release left X to return.\nLeft stick: move this panel."); return false; }
+            if (!rightControllerTracked)
+            {
+                // Controller sleep cancels input; fresh head/camera data still drives accepted imagery.
+                bool allCovered = UpdateLiveRegions();
+                SetInstruction(!allCovered ? CoverageInstruction : "Connect right controller to draw or move.\nLeft stick: panel. Hold left X: original.");
+                return false;
+            }
+            return true;
         }
 
         private void MoveHud(Vector2 delta)
