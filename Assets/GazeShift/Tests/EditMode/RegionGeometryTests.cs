@@ -112,6 +112,52 @@ namespace GazeShift.Tests
             Assert.IsTrue(RegionGeometry.Overlaps(DenseRectangle(0.64f, 0.39f), DenseRectangle(0.16f, 0.1f), ref remaining));
             Assert.AreEqual(0, remaining);
         }
+        [Test] public void SeparatedDenseCirclesWithOverlappingBoundsFitCollisionBudget()
+        {
+            var a = new Vector2[480];
+            var b = new Vector2[480];
+            for (int i = 0; i < a.Length; i++)
+            {
+                double angle = i * Math.PI * 2 / a.Length;
+                a[i] = new Vector2((float)Math.Cos(angle) * 0.22f, (float)Math.Sin(angle) * 0.22f);
+                b[i] = a[i] + new Vector2(-0.425f, 0.175f);
+            }
+            int remaining = 32768;
+            Assert.IsFalse(RegionGeometry.Overlaps(a, b, ref remaining));
+            Assert.Greater(remaining, 0);
+            Array.Reverse(b);
+            remaining = 32768;
+            Assert.IsFalse(RegionGeometry.Overlaps(a, b, ref remaining));
+            Assert.Greater(remaining, 0);
+        }
+        [Test] public void TouchAtEdgeBlockEndpointStillOverlaps()
+        {
+            Vector2[] rectangle = DenseRectangle(2, 0.2f);
+            var a = new Vector2[rectangle.Length];
+            var b = new Vector2[rectangle.Length];
+            for (int i = 0; i < rectangle.Length; i++)
+            {
+                a[i] = rectangle[(i + 224) % rectangle.Length];
+                b[i] = rectangle[(i + 464) % rectangle.Length] + new Vector2(4, 0.4f);
+            }
+            // The sole shared corner is vertex 16 on each boundary, between edge blocks.
+            Assert.IsTrue(RegionGeometry.Overlaps(a, b));
+        }
+        [Test] public void TouchOnClosingEdgeStillOverlaps()
+        {
+            var a = new Vector2[34];
+            for (int i = 0; i <= 16; i++)
+            {
+                a[i] = new Vector2(-2 + i * 0.25f, -0.2f);
+                a[17 + i] = new Vector2(2 - i * 0.25f, 0.2f);
+            }
+            Vector2[] corners = { new Vector2(-3, -0.1f), new Vector2(-3, 0.1f), new Vector2(-2, 0) };
+            var b = new Vector2[60];
+            for (int edge = 0; edge < corners.Length; edge++)
+                for (int i = 0; i < 20; i++)
+                    b[edge * 20 + i] = corners[edge] + (corners[(edge + 1) % corners.Length] - corners[edge]) * (i / 20f);
+            Assert.IsTrue(RegionGeometry.Overlaps(a, b));
+        }
         private static Vector2[] DenseRectangle(float halfWidth, float halfHeight)
         {
             var points = new Vector2[480];

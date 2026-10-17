@@ -8,6 +8,7 @@ namespace GazeShift
     {
         public const float Epsilon = 0.000001f;
         public const float MinimumArea = 0.0004f;
+        private const int EdgesPerBlock = 16;
 
         public static bool TryCanvasHit(Vector3 origin, Vector3 direction, Vector2 halfExtent, out Vector2 hit)
         {
@@ -123,18 +124,55 @@ namespace GazeShift
 
         internal static bool Overlaps(IReadOnlyList<Vector2> a, IReadOnlyList<Vector2> b, ref int remainingChecks)
         {
-            // A depleted work budget blocks placement rather than approving an untested collision.
+            // shortcut: exhausted budgets block untested complex packing; refine broad phase if those layouts must fit.
             if (!TryBounds(a, ref remainingChecks, out Vector2 aMin, out Vector2 aMax) || !TryBounds(b, ref remainingChecks, out Vector2 bMin, out Vector2 bMax)) return true;
             if (aMax.x < bMin.x - Epsilon || bMax.x < aMin.x - Epsilon || aMax.y < bMin.y - Epsilon || bMax.y < aMin.y - Epsilon) return false;
             if (!TryContainsPoint(a, b[0], ref remainingChecks, out bool bInside) || bInside) return true;
             if (!TryContainsPoint(b, a[0], ref remainingChecks, out bool aInside) || aInside) return true;
-            for (int i = 0; i < a.Count; i++)
-                for (int j = 0; j < b.Count; j++)
+            // Quarter-boundary probes catch dense crossing circles before costly segment pairs.
+            for (int probe = 1; probe < 4; probe++)
+            {
+                if (!TryContainsPoint(a, b[b.Count * probe / 4], ref remainingChecks, out bInside) || bInside) return true;
+                if (!TryContainsPoint(b, a[a.Count * probe / 4], ref remainingChecks, out aInside) || aInside) return true;
+            }
+            if (!TryEdgeBlockBounds(a, ref remainingChecks, out Vector2[] aBlockMin, out Vector2[] aBlockMax) ||
+                !TryEdgeBlockBounds(b, ref remainingChecks, out Vector2[] bBlockMin, out Vector2[] bBlockMax)) return true;
+            // Consecutive edge bounds reject separated dense arcs without changing their exact boundary.
+            for (int aBlock = 0; aBlock < aBlockMin.Length; aBlock++)
+                for (int bBlock = 0; bBlock < bBlockMin.Length; bBlock++)
                 {
                     if (!ConsumeCheck(ref remainingChecks)) return true;
-                    if (SegmentsIntersect(a[i], a[(i + 1) % a.Count], b[j], b[(j + 1) % b.Count])) return true;
+                    if (aBlockMax[aBlock].x < bBlockMin[bBlock].x - Epsilon || bBlockMax[bBlock].x < aBlockMin[aBlock].x - Epsilon ||
+                        aBlockMax[aBlock].y < bBlockMin[bBlock].y - Epsilon || bBlockMax[bBlock].y < aBlockMin[aBlock].y - Epsilon) continue;
+                    int aEnd = Math.Min((aBlock + 1) * EdgesPerBlock, a.Count);
+                    int bEnd = Math.Min((bBlock + 1) * EdgesPerBlock, b.Count);
+                    for (int i = aBlock * EdgesPerBlock; i < aEnd; i++)
+                        for (int j = bBlock * EdgesPerBlock; j < bEnd; j++)
+                        {
+                            if (!ConsumeCheck(ref remainingChecks)) return true;
+                            if (SegmentsIntersect(a[i], a[(i + 1) % a.Count], b[j], b[(j + 1) % b.Count])) return true;
+                        }
                 }
             return false;
+        }
+
+        private static bool TryEdgeBlockBounds(IReadOnlyList<Vector2> polygon, ref int remainingChecks, out Vector2[] min, out Vector2[] max)
+        {
+            int blockCount = (polygon.Count + EdgesPerBlock - 1) / EdgesPerBlock;
+            min = new Vector2[blockCount]; max = new Vector2[blockCount];
+            for (int block = 0; block < blockCount; block++)
+            {
+                int start = block * EdgesPerBlock;
+                int end = Math.Min(start + EdgesPerBlock, polygon.Count);
+                min[block] = max[block] = polygon[start];
+                for (int edge = start; edge < end; edge++)
+                {
+                    if (!ConsumeCheck(ref remainingChecks)) return false;
+                    Vector2 point = polygon[(edge + 1) % polygon.Count];
+                    min[block] = Vector2.Min(min[block], point); max[block] = Vector2.Max(max[block], point);
+                }
+            }
+            return true;
         }
 
         private static bool TryBounds(IReadOnlyList<Vector2> polygon, ref int remainingChecks, out Vector2 min, out Vector2 max)
