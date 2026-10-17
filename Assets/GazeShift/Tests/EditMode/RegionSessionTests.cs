@@ -85,6 +85,40 @@ namespace GazeShift.Tests
             Assert.IsFalse(session.FinishStroke());
             Assert.AreEqual(0, session.Pending.Count);
         }
+        [Test] public void NearlyFullCanvasRejectsWithinBoundedPlacementAttempts()
+        {
+            var session = new RegionSession();
+            session.BeginTrigger(false);
+            for (int i = 0; i < 120; i++) session.AddPoint(new Vector2(-0.64f + 1.28f * i / 120, -0.39f));
+            for (int i = 0; i < 120; i++) session.AddPoint(new Vector2(0.64f, -0.39f + 0.78f * i / 120));
+            for (int i = 0; i < 120; i++) session.AddPoint(new Vector2(0.64f - 1.28f * i / 120, 0.39f));
+            for (int i = 0; i < 120; i++) session.AddPoint(new Vector2(-0.64f, 0.39f - 0.78f * i / 120));
+            session.AddPoint(new Vector2(-0.64f, -0.39f));
+            Assert.IsTrue(session.FinishStroke());
+            Assert.IsFalse(session.AcceptPending());
+            Assert.LessOrEqual(session.LastPlacementAttempts, 52);
+            Assert.AreEqual(1, session.Pending.Count); Assert.AreEqual(0, session.Accepted.Count);
+        }
+        [Test] public void DenseConvexAndConcaveStrokesStillAcceptExactCopies()
+        {
+            var circle = new RegionSession(); circle.BeginTrigger(false);
+            for (int i = 0; i <= 480; i++)
+            {
+                double angle = i * Math.PI * 2 / 480;
+                circle.AddPoint(new Vector2((float)Math.Cos(angle) * 0.16f, (float)Math.Sin(angle) * 0.16f));
+            }
+            Assert.IsTrue(circle.FinishStroke()); Assert.IsTrue(circle.AcceptPending());
+            Assert.AreEqual(480, circle.Accepted[0].Source.Length);
+            Assert.IsFalse(RegionGeometry.Overlaps(circle.Accepted[0].Source, circle.Accepted[0].DestinationPolygon()));
+            var concave = new RegionSession(); concave.BeginTrigger(false);
+            Vector2[] corners = { new Vector2(-0.12f, -0.12f), new Vector2(0.12f, -0.12f), new Vector2(0.12f, 0), Vector2.zero, new Vector2(0, 0.12f), new Vector2(-0.12f, 0.12f) };
+            for (int edge = 0; edge < corners.Length; edge++)
+                for (int i = 0; i < 80; i++) concave.AddPoint(corners[edge] + (corners[(edge + 1) % corners.Length] - corners[edge]) * (i / 80f));
+            concave.AddPoint(corners[0]);
+            Assert.IsTrue(concave.FinishStroke()); Assert.IsTrue(concave.AcceptPending());
+            Assert.AreEqual(480, concave.Accepted[0].Source.Length);
+            Assert.IsFalse(RegionGeometry.Overlaps(concave.Accepted[0].Source, concave.Accepted[0].DestinationPolygon()));
+        }
         private static void DrawCircle(RegionSession session, Vector2 center)
         {
             session.BeginTrigger(false);

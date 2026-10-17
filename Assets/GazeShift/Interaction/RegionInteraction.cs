@@ -12,6 +12,7 @@ namespace GazeShift
         private const float StickDeadzone = 0.2f;
         private const float InstructionDuration = 3f;
         private const float RayLength = 4f;
+        private const int TextRenderQueue = 3020;
         private const string Instructions = "Hold trigger: trace a closed region. Accept or A. B: undo.\nGrip: select and drag a copy. Right stick: resize.";
         private const string CoverageInstruction = "Draw closer to the center; the camera view is narrower.";
         private readonly RegionSession session = new RegionSession();
@@ -28,6 +29,8 @@ namespace GazeShift
         private Material liveMaterial;
         private Material outlineMaterial;
         private Material buttonMaterial;
+        private Material textMaterial;
+        private Font textFont;
         private RegionData selected;
         private Vector2 dragOffset;
         private bool dragging;
@@ -215,8 +218,19 @@ namespace GazeShift
         private void OnDestroy()
         {
             foreach (LiveRegionView view in views.Values) view.Dispose();
-            if (plane != null) Destroy(plane.gameObject);
-            Destroy(liveMaterial); Destroy(outlineMaterial); Destroy(buttonMaterial);
+            Font.textureRebuilt -= RefreshFontTexture;
+            if (plane != null) DestroyOwned(plane.gameObject);
+            DestroyOwned(liveMaterial); DestroyOwned(outlineMaterial); DestroyOwned(buttonMaterial); DestroyOwned(textMaterial);
+        }
+
+        private static void DestroyOwned(Object resource)
+        {
+            if (resource == null) return;
+            if (Application.isPlaying) Destroy(resource); else DestroyImmediate(resource);
+        }
+        private void RefreshFontTexture(Font font)
+        {
+            if (font == textFont && textMaterial != null) textMaterial.mainTexture = font.material.mainTexture;
         }
 
         private LineRenderer CreateLine(string name, bool worldSpace)
@@ -233,8 +247,14 @@ namespace GazeShift
             var label = new GameObject(name, typeof(TextMesh)).GetComponent<TextMesh>();
             label.transform.SetParent(plane, false); label.transform.localPosition = position;
             label.text = text; label.anchor = TextAnchor.MiddleCenter; label.alignment = TextAlignment.Center;
-            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            label.GetComponent<MeshRenderer>().sharedMaterial = label.font.material;
+            if (textFont == null)
+            {
+                textFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                textMaterial = new Material(textFont.material) { name = "GazeShift text", renderQueue = TextRenderQueue };
+                Font.textureRebuilt += RefreshFontTexture;
+            }
+            label.font = textFont;
+            label.GetComponent<MeshRenderer>().sharedMaterial = textMaterial;
             label.fontSize = 64; label.characterSize = size; label.color = Color.white;
             return label;
         }
@@ -244,7 +264,7 @@ namespace GazeShift
             button.name = "Accept regions"; button.transform.SetParent(plane, false);
             button.transform.localPosition = new Vector3(0, -0.47f, -0.01f);
             button.transform.localScale = new Vector3(0.25f, 0.065f, 1);
-            Destroy(button.GetComponent<Collider>());
+            DestroyOwned(button.GetComponent<Collider>());
             button.GetComponent<MeshRenderer>().sharedMaterial = buttonMaterial;
             acceptCollider = button.AddComponent<BoxCollider>(); acceptCollider.size = new Vector3(1, 1, 0.01f);
             CreateText("Accept regions label", "Accept regions", new Vector3(0, -0.47f, -0.02f), 0.027f);

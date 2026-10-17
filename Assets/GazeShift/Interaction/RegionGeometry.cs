@@ -97,23 +97,60 @@ namespace GazeShift
 
         public static bool ContainsPoint(IReadOnlyList<Vector2> polygon, Vector2 point)
         {
-            if (polygon == null || polygon.Count < 3 || !IsFinite(point)) return false;
-            bool inside = false;
+            int remainingChecks = int.MaxValue;
+            return TryContainsPoint(polygon, point, ref remainingChecks, out bool inside) && inside;
+        }
+
+        private static bool TryContainsPoint(IReadOnlyList<Vector2> polygon, Vector2 point, ref int remainingChecks, out bool inside)
+        {
+            inside = false;
+            if (polygon == null || polygon.Count < 3 || !IsFinite(point)) return true;
             for (int i = 0, j = polygon.Count - 1; i < polygon.Count; j = i++)
             {
+                if (!ConsumeCheck(ref remainingChecks)) return false;
                 Vector2 a = polygon[j], b = polygon[i];
-                if (OnSegment(a, b, point)) return true;
+                if (OnSegment(a, b, point)) { inside = true; return true; }
                 if ((a.y > point.y) != (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
             }
-            return inside;
+            return true;
         }
 
         public static bool Overlaps(IReadOnlyList<Vector2> a, IReadOnlyList<Vector2> b)
         {
+            int remainingChecks = int.MaxValue;
+            return Overlaps(a, b, ref remainingChecks);
+        }
+
+        internal static bool Overlaps(IReadOnlyList<Vector2> a, IReadOnlyList<Vector2> b, ref int remainingChecks)
+        {
+            // A depleted work budget blocks placement rather than approving an untested collision.
+            if (!TryBounds(a, ref remainingChecks, out Vector2 aMin, out Vector2 aMax) || !TryBounds(b, ref remainingChecks, out Vector2 bMin, out Vector2 bMax)) return true;
+            if (aMax.x < bMin.x - Epsilon || bMax.x < aMin.x - Epsilon || aMax.y < bMin.y - Epsilon || bMax.y < aMin.y - Epsilon) return false;
+            if (!TryContainsPoint(a, b[0], ref remainingChecks, out bool bInside) || bInside) return true;
+            if (!TryContainsPoint(b, a[0], ref remainingChecks, out bool aInside) || aInside) return true;
             for (int i = 0; i < a.Count; i++)
                 for (int j = 0; j < b.Count; j++)
+                {
+                    if (!ConsumeCheck(ref remainingChecks)) return true;
                     if (SegmentsIntersect(a[i], a[(i + 1) % a.Count], b[j], b[(j + 1) % b.Count])) return true;
-            return ContainsPoint(a, b[0]) || ContainsPoint(b, a[0]);
+                }
+            return false;
+        }
+
+        private static bool TryBounds(IReadOnlyList<Vector2> polygon, ref int remainingChecks, out Vector2 min, out Vector2 max)
+        {
+            min = max = polygon[0];
+            for (int i = 1; i < polygon.Count; i++)
+            {
+                if (!ConsumeCheck(ref remainingChecks)) return false;
+                Vector2 point = polygon[i]; min = Vector2.Min(min, point); max = Vector2.Max(max, point);
+            }
+            return true;
+        }
+        private static bool ConsumeCheck(ref int remainingChecks)
+        {
+            if (remainingChecks <= 0) return false;
+            remainingChecks--; return true;
         }
 
         private static float Cross(Vector2 a, Vector2 b, Vector2 c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);

@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -95,6 +97,43 @@ namespace GazeShift.Tests
         {
             Vector2[] tiny = { Vector2.zero, new Vector2(0.001f, 0), new Vector2(0, 0.001f) };
             Assert.IsFalse(RegionGeometry.TryTriangulate(tiny, out _, out _));
+        }
+
+        [Test] public void ContainedDenseBoundariesAvoidQuadraticCollisionScan()
+        {
+            var outer = new CountingPolygon(DenseRectangle(0.64f, 0.39f));
+            var inner = new CountingPolygon(DenseRectangle(0.16f, 0.1f));
+            Assert.IsTrue(RegionGeometry.Overlaps(outer, inner));
+            Assert.LessOrEqual(outer.Reads + inner.Reads, 8192);
+        }
+        [Test] public void ExhaustedCollisionBudgetConservativelyBlocksCandidate()
+        {
+            int remaining = 4;
+            Assert.IsTrue(RegionGeometry.Overlaps(DenseRectangle(0.64f, 0.39f), DenseRectangle(0.16f, 0.1f), ref remaining));
+            Assert.AreEqual(0, remaining);
+        }
+        private static Vector2[] DenseRectangle(float halfWidth, float halfHeight)
+        {
+            var points = new Vector2[480];
+            for (int i = 0; i < 120; i++)
+            {
+                float t = i / 120f;
+                points[i] = new Vector2(-halfWidth + 2 * halfWidth * t, -halfHeight);
+                points[120 + i] = new Vector2(halfWidth, -halfHeight + 2 * halfHeight * t);
+                points[240 + i] = new Vector2(halfWidth - 2 * halfWidth * t, halfHeight);
+                points[360 + i] = new Vector2(-halfWidth, halfHeight - 2 * halfHeight * t);
+            }
+            return points;
+        }
+        private sealed class CountingPolygon : IReadOnlyList<Vector2>
+        {
+            private readonly Vector2[] points;
+            public int Reads { get; private set; }
+            public CountingPolygon(Vector2[] boundary) => points = boundary;
+            public int Count => points.Length;
+            public Vector2 this[int index] { get { Reads++; return points[index]; } }
+            public IEnumerator<Vector2> GetEnumerator() => ((IEnumerable<Vector2>)points).GetEnumerator();
+            IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
         }
 
         private static float TriangleArea(Vector2[] vertices, int[] indices)

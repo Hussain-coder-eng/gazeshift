@@ -9,6 +9,7 @@ namespace GazeShift
         public readonly Vector2[] Source;
         public readonly int[] Triangles;
         public readonly Vector2 SourceCenter;
+        public readonly Vector2 SourceHalfExtent;
         internal readonly Vector2[] PlacementBuffer;
         internal readonly Vector2[] CopyBoundary;
         internal bool HasPlacement;
@@ -21,7 +22,7 @@ namespace GazeShift
             PlacementBuffer = new Vector2[source.Length]; CopyBoundary = new Vector2[source.Length];
             Vector2 min = source[0], max = source[0];
             for (int i = 1; i < source.Length; i++) { min = Vector2.Min(min, source[i]); max = Vector2.Max(max, source[i]); }
-            SourceCenter = (min + max) * 0.5f;
+            SourceCenter = (min + max) * 0.5f; SourceHalfExtent = (max - min) * 0.5f;
         }
         public Vector2 CopyPoint(int index) => (Source[index] - SourceCenter) * Scale + Destination;
         public bool ContainsCopy(Vector2 point) => RegionGeometry.ContainsPoint(Source, (point - Destination) / Scale + SourceCenter);
@@ -42,9 +43,13 @@ namespace GazeShift
         public const float MinimumScale = 0.25f;
         public const float MaximumScale = 2;
         public const float SampleSpacing = 0.001f;
-        private const float PlacementStep = 0.05f;
+        private const float PlacementGap = 0.005f;
+        private const int MaximumPlacementCandidates = 52;
+        private const int MaximumAcceptanceChecks = 32768;
+        private int remainingAcceptanceChecks;
         public static readonly Vector2 CanvasHalfExtent = new Vector2(0.65f, 0.4f);
         public bool IsDrawing { get; private set; }
+        internal int LastPlacementAttempts { get; private set; }
         public readonly List<Vector2> Stroke = new List<Vector2>();
         public readonly List<RegionData> Pending = new List<RegionData>();
         public readonly List<RegionData> Accepted = new List<RegionData>();
@@ -82,7 +87,7 @@ namespace GazeShift
         }
         public bool AcceptPending()
         {
-            CancelStroke();
+            CancelStroke(); LastPlacementAttempts = 0; remainingAcceptanceChecks = MaximumAcceptanceChecks;
             for (int i = 0; i < Pending.Count; i++) Pending[i].HasPlacement = false;
             for (int i = 0; i < Pending.Count; i++) if (!FindInitialDestination(Pending[i]))
             {
@@ -94,27 +99,50 @@ namespace GazeShift
         }
         private bool FindInitialDestination(RegionData region)
         {
+            int firstAttempt = LastPlacementAttempts;
+            // Candidates touch source or canvas bounds; exact polygon checks decide validity.
+            // shortcut: boundary candidates and a finite work budget can reject tight concave packing; upgrade to incremental free-space search if needed.
             for (float scale = 1; scale >= MinimumScale; scale -= MinimumScale)
-                for (float y = CanvasHalfExtent.y - PlacementStep; y > -CanvasHalfExtent.y; y -= PlacementStep)
-                    for (float x = -CanvasHalfExtent.x + PlacementStep; x < CanvasHalfExtent.x; x += PlacementStep)
-                        if (TryPlace(region, new Vector2(x, y), scale)) return true;
+            {
+                Vector2 half = region.SourceHalfExtent * scale;
+                Vector2 sourceOffset = region.SourceHalfExtent + half + Vector2.one * PlacementGap;
+                for (int side = 0; side < 4; side++)
+                {
+                    Vector2 offset = side < 2 ? new Vector2((side == 0 ? -1 : 1) * sourceOffset.x, 0) : new Vector2(0, (side == 2 ? -1 : 1) * sourceOffset.y);
+                    LastPlacementAttempts++;
+                    if (TryPlace(region, region.SourceCenter + offset, scale, ref remainingAcceptanceChecks)) return true;
+                    if (remainingAcceptanceChecks == 0) return false;
+                }
+                Vector2 range = CanvasHalfExtent - half - Vector2.one * PlacementGap;
+                if (range.x < 0 || range.y < 0) continue;
+                for (int y = 0; y < 3; y++)
+                    for (int x = 0; x < 3; x++)
+                    {
+                        if (LastPlacementAttempts - firstAttempt >= MaximumPlacementCandidates) return false;
+                        LastPlacementAttempts++;
+                        if (TryPlace(region, new Vector2((x - 1) * range.x, (1 - y) * range.y), scale, ref remainingAcceptanceChecks)) return true;
+                        if (remainingAcceptanceChecks == 0) return false;
+                    }
+            }
             return false;
         }
         public bool TryPlace(RegionData region, Vector2 center, float scale)
         {
+            int remainingChecks = MaximumAcceptanceChecks;
+            return TryPlace(region, center, scale, ref remainingChecks);
+        }
+        private bool TryPlace(RegionData region, Vector2 center, float scale, ref int remainingChecks)
+        {
             if (region == null || !RegionGeometry.IsFinite(center) || !RegionGeometry.IsFinite(scale) || scale < MinimumScale || scale > MaximumScale) return false;
-            for (int i = 0; i < region.Source.Length; i++)
-            {
-                Vector2 point = (region.Source[i] - region.SourceCenter) * scale + center;
-                if (!InsideCanvas(point)) return false;
-                region.PlacementBuffer[i] = point;
-            }
-            for (int i = 0; i < Accepted.Count; i++) if (RegionGeometry.Overlaps(region.PlacementBuffer, Accepted[i].Source)) return false;
-            for (int i = 0; i < Pending.Count; i++) if (RegionGeometry.Overlaps(region.PlacementBuffer, Pending[i].Source)) return false;
+            Vector2 half = region.SourceHalfExtent * scale;
+            if (Math.Abs(center.x) + half.x > CanvasHalfExtent.x || Math.Abs(center.y) + half.y > CanvasHalfExtent.y) return false;
+            for (int i = 0; i < region.Source.Length; i++) region.PlacementBuffer[i] = (region.Source[i] - region.SourceCenter) * scale + center;
+            for (int i = 0; i < Accepted.Count; i++) if (RegionGeometry.Overlaps(region.PlacementBuffer, Accepted[i].Source, ref remainingChecks)) return false;
+            for (int i = 0; i < Pending.Count; i++) if (RegionGeometry.Overlaps(region.PlacementBuffer, Pending[i].Source, ref remainingChecks)) return false;
             for (int i = 0; i < Accepted.Count; i++)
-                if (Accepted[i] != region && RegionGeometry.Overlaps(region.PlacementBuffer, Accepted[i].CopyBoundary)) return false;
+                if (Accepted[i] != region && RegionGeometry.Overlaps(region.PlacementBuffer, Accepted[i].CopyBoundary, ref remainingChecks)) return false;
             for (int i = 0; i < Pending.Count; i++)
-                if (Pending[i] != region && Pending[i].HasPlacement && RegionGeometry.Overlaps(region.PlacementBuffer, Pending[i].CopyBoundary)) return false;
+                if (Pending[i] != region && Pending[i].HasPlacement && RegionGeometry.Overlaps(region.PlacementBuffer, Pending[i].CopyBoundary, ref remainingChecks)) return false;
             region.Destination = center; region.Scale = scale; region.HasPlacement = true;
             Array.Copy(region.PlacementBuffer, region.CopyBoundary, region.CopyBoundary.Length);
             return true;
