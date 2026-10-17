@@ -67,7 +67,7 @@
 - [ ] **Step 2:** Implement simple-polygon validation and ear-clipping triangulation; retain the original boundary. Run geometry tests; preserve named existing thresholds of 20 distinct samples and 0.03 canvas-diagonal closure.
 - [ ] **Step 3:** Write failing state/placement tests for trigger UI priority, interrupted stroke invalidation, multiple source regions, destination rejection, and resize limits; implement the minimal state model.
 - [ ] **Step 4:** Implement head-relative one-meter canvas, right-controller drawing, floating Accept/A acceptance, B undo, grip selection/drag, and thumbstick resize. Use a single instruction surface and **Accept regions** button text.
-- [ ] **Step 5:** Render live polygon-only source blur and distinct sharp copy meshes. Update original-source UVs each frame with `TryWorldToTextureUv`; clear effects whenever `IsReady` is false and never sample a prior composite.
+- [ ] **Step 5:** Render live polygon-only source blur and distinct sharp copy meshes. Update original-source UVs each frame with `TryWorldToTextureUv`; hide the paired blur/copy if any source vertex fails projection, clear all effects when `IsReady` is false, and never sample a prior composite.
 - [ ] **Step 6:** Run EditMode tests and Unity compile with Task 1 interface available; commit only Interaction/Shaders/Tests files. Report exact verification limits.
 
 ### Task 3: Integration, build, and review

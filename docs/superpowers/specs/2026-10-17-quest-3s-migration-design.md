@@ -13,7 +13,7 @@ The user requested the complete migration and GitHub commit/push. The Gang uses 
 - Support multiple independent regions. Acceptance freezes their source polygons in head-relative coordinates, preserving the old screen-fixed intent. Source polygons do not follow the eyes or world objects.
 - Grip and point at an accepted source region or copy to select and drag its sharp copy. Right-thumbstick vertical motion resizes the selected copy about its center. The source mask stays in place. Keep the last valid destination when a new drag/resize would leave the canvas or overlap a source region.
 - The sharp copy uses the original live camera texture, never the blurred overlay or another copy. Apply a live blur only inside each accepted source polygon. Preserve the drawn polygon instead of replacing it with the old bounding ellipse. Destination copies cover real destination content.
-- Camera loss, denied permission, or app suspension removes blur/copy effects; passthrough and actionable instructions remain. A fresh camera frame is required before effects resume. Never display a frozen camera patch as live.
+- Camera loss, denied permission, or app suspension removes blur/copy effects; passthrough and actionable instructions remain. A fresh camera frame is required before effects resume. If any source vertex cannot project into the sampled camera image, hide both source blur and its copy. Never display a frozen camera patch as live.
 
 ## Engineering decisions
 

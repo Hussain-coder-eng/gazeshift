@@ -1,0 +1,9 @@
+{
+  "name": "GazeShift.Runtime",
+  "rootNamespace": "GazeShift",
+  "references": ["meta.xr.mrutilitykit", "Oculus.VR"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "autoReferenced": true
+}

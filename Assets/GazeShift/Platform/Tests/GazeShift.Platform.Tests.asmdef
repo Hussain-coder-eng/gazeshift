@@ -1,0 +1,7 @@
+{
+  "name": "GazeShift.Platform.Tests",
+  "references": ["GazeShift.Runtime"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}
