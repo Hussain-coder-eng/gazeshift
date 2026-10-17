@@ -1,31 +1,56 @@
-# GazeShift
+# GazeShift for Meta Quest 3S
 
-GazeShift is a working title for an experimental phone display tool: draw an assumed affected region, review an approximate ellipse, and copy the original image content from that region to a chosen display offset.
+A manual mixed-reality image-relocation experiment. Draw polygons with the right controller over full-color passthrough, accept the regions, and move/rescale sharp live camera-image copies while the source polygons remain blurred. The app opens directly into passthrough; there is no front-camera setup or eye tracking.
 
-**Current direction: manual screen-space approximation using front-camera index tracing or rear screen drawing, with no eye tracking.** The prior thumb/pinch build `1011.18.10` was installed on a physical **iPhone 15 Pro Max**, but the user reported that their physical tracing attempt produced no line and failed. The user explicitly dropped thumb/pinch input. A successful end-to-end phone demo remains unverified.
+## Controls
 
-**Rear screen drawing (`1011.18.24`):** Select **Rear scene**, wait for the live camera, then tap **Start drawing**. Draw a closed loop directly on the camera image, return to the yellow start dot, and lift to review the yellow trace and cyan ellipse. **Finish shape** also freezes the outline. Tap **Accept region**, then use the always-visible **← → ↑ ↓** copy-offset controls. **Start drawing** or **Draw again** replaces the current region. Front setup keeps camera-tracked index-finger air drawing. This update includes the upright portrait/landscape camera layout; rear touch delivery and the complete workflow still need physical-phone verification.
+1. Hold the right trigger and trace a closed loop. Release near the start. Repeat for more regions; B undoes the newest unaccepted region, or the newest accepted region when none are pending.
+2. Point at **Accept regions** and press the trigger, or press A.
+3. Point at an accepted region or copy and hold grip to move its sharp copy. Move the right thumbstick up/down to resize the selected copy. Accepting regions selects the newest copy.
+4. Move the left thumbstick to reposition the instructions and Accept button. Hold left X to peek at the original view; release to restore effects after fresh camera coverage returns.
 
-## The front air-drawing demo
+Source regions stay fixed relative to the headset. Invalid copies outside the working area or over a source region retain their last valid placement. Camera loss removes blur/copies until fresh imagery returns. Only instructions and **Accept regions** appear as text; diagnostics stay in logs.
 
-Use the front camera and Vision index-finger landmarks. Tap **Start drawing** to arm recording; ordinary finger movement before Start creates no shape. Trace one closed loop with the index finger only and watch the outline accumulate. Return to the start and keep the index visible while the other hand taps **Finish shape**, which freezes a valid candidate for review. Review its min/max bounding ellipse, then separately tap **Accept region** to commit it. Choose one copy offset, then switch the same ARSession to the rear scene. The reviewed region stays fixed in display coordinates; copy its enclosing rectangle from the original frame to the selected offset. Reject unavailable, overlapping or off-screen placements. The copy affects only the phone display and covers existing destination content.
+## Setup and build
 
-Actual camera-tracked air tracing remains required in Front setup; rear drawing uses screen touches with a fresh rear camera source. Existing checks still require a closed loop with at least 20 distinct points, valid samples and matching source identity. Eye movement and head movement do not drive the region, and there is no gaze calibration or synthetic gaze input. Accept region selects the labeled Simulated blur preview. Normal Live assist stays unblurred. Preserve the labeled, full-viewport Original / Simulated blur / Simulated blur + copy comparison, using original source pixels and applying blur last.
+Use **Unity 6000.4.1f1**, Android Build Support with SDK/NDK and OpenJDK, an active Unity license, and **Quest 3 or Quest 3S with Horizon OS v81 or newer**. Use the native ARM64 editor on Apple Silicon. Grant headset camera permission when asked.
 
-Success means a playable recording of actual air tracing, explicit review, rear-scene copying and the three comparison modes on the physical phone. Gesture behavior, placement, source freshness and loss/recovery still need device verification; a build or launch cannot pass those gates.
+Open the repository root as a Unity project. Versions are pinned: Meta XR Core/MRUK **85.0.0**, OpenXR **1.16.1**, XR Management **4.5.4**. Packages resolve through Unity's registry and the official Meta registry.
 
-## Project documents
+Choose **GazeShift → Configure Quest project** to regenerate the scene, Android/OpenXR settings, camera permission configuration, and required shader inclusion. Choose **GazeShift → Build Quest APK** to build Android ARM64 IL2CPP to `Builds/GazeShift.apk`. `GAZESHIFT_APK_PATH` may override the APK output path.
 
-- [Project context and working instructions](PROJECT_CONTEXT.md): current scope, architecture and evidence limits.
-- [Six-hour build plan](SIX_HOUR_PLAN.md): concise manual-flow implementation and device checks.
-- [Historical build prompts](BUILD_PROMPTS.md): superseded gaze requirements; do not execute them as the current spec.
-- [Private GitHub repository](https://github.com/Hussain-coder-eng/gazeshift).
-- [ChatGPT project](https://chatgpt.com/g/g-p-6acbc5e009008191a0d00a958ec143d0/project).
+With the Unity CLI installed:
 
-The [rear gaze blocker](docs/P2_REAR_GAZE_BLOCKER.md), [front diagnostic blocker](docs/P2_FRONT_DIAGNOSTIC_BLOCKER.md) and [off-screen diagnostics](docs/P2_OFFSCREEN_DIAGNOSTICS.md) preserve earlier results. They describe the superseded gaze approach, not current acceptance gates.
+```sh
+unity run . -- -executeMethod GazeShift.Editor.QuestProjectSetup.Configure
+unity test . --mode EditMode --output test-results.xml
+unity run . -- -executeMethod GazeShift.Editor.QuestProjectSetup.BuildAndroid
+```
 
-## Evidence and boundaries
+The CLI launches the pinned editor and manages batch/quit flags. A direct editor invocation also works:
 
-A hand-drawn screen region does not measure retinal damage or follow a retinal blind spot as the eyes move. This manual approximation cannot diagnose disease, restore normal sight, replace prescriptions or establish patient benefit. Simulated blur illustrates the selected region; it does not reproduce a patient's vision. The copy duplicates content and occludes destination content.
+```sh
+Unity -batchmode -nographics -quit -projectPath "$PWD" -executeMethod GazeShift.Editor.QuestProjectSetup.Configure
+Unity -batchmode -projectPath "$PWD" -runTests -testPlatform EditMode -testResults test-results.xml
+Unity -batchmode -nographics -quit -projectPath "$PWD" -executeMethod GazeShift.Editor.QuestProjectSetup.BuildAndroid
+```
 
-Future assistive benefit requires separate user and clinical validation, including comparison with ordinary magnification and independently measured vision mapping. No low-vision participant, clinician partnership or startup validation is confirmed. The present scope is the phone demonstration, not wearable hardware or medical treatment.
+Configuration also works without the Android module, so committed XR settings can be inspected and tested. Building an APK requires the Android module and its SDK/NDK/OpenJDK toolchain.
+
+The manual GitHub Actions workflow requires repository Unity license credentials; their presence is not assumed. Never commit license files, signing keys, captured images, or APKs.
+
+## Verification and limits
+
+Local verification on October 17, 2026: Unity 6000.4.1f1 imported and compiled the project; all **58 EditMode tests passed**, including repeatable XR/scene setup, UI resource cleanup, camera freshness, and forced desktop Metal shader compilation. The exact Configure batch entry point succeeded. The Android build attempt stopped at the explicit missing Android Build Support/SDK/NDK/OpenJDK gate, so no APK or headset interaction is verified. GitHub Actions has not run.
+
+Tests cover concave polygon triangulation, winding, invalid strokes, overlap/bounds rejection, scale limits, controller action priority, camera projection failure, and camera freshness recovery. Tests and compilation cannot verify headset alignment or physical interaction.
+
+Headset acceptance: launch straight into passthrough; grant/deny camera access; draw multiple regions; select Accept using the controller; verify source-only live blur; drag/resize live sharp copies; move the head; suspend/resume and interrupt camera input. Report which checks actually ran. An APK build is separate from installation and this interaction sequence.
+
+The [simulated accessibility scenarios](docs/ACCESSIBILITY_SCENARIOS.md) explain the controller feedback and visual cues. These are hypothetical reviews, not feedback collected from people or measured accessibility results.
+
+The app duplicates camera pixels and covers destination content. Its head-relative masks are assumed regions, not retinal measurements. Camera coverage is smaller than headset passthrough, so effects disappear where source pixels cannot be sampled. The fixed plane is not scene reconstruction or validated binocular registration. No diagnosis, treatment, vision benefit, clinical result, measured latency, or frame-rate claim is established.
+
+The retired Swift/ARKit/Metal prototype remains recoverable in Git history at `5a405be6b6fc1b7c6b5e9405bb2d044cb619e470`; the active tree contains the Quest app only. See the [migration design](docs/superpowers/specs/2026-10-17-quest-3s-migration-design.md) and [plan](docs/superpowers/plans/2026-10-17-quest-3s-migration.md).
+
+SDK references: [Meta camera overview](https://developers.meta.com/horizon/documentation/unity/unity-pca-overview/), [MRUK camera reference](https://developers.meta.com/vr/reference/mruk/v85/class_meta_x_r_passthrough_camera_access/), [official camera samples](https://github.com/oculus-samples/Unity-PassthroughCameraApiSamples).
