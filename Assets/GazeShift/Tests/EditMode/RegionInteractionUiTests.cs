@@ -161,7 +161,7 @@ namespace GazeShift.Tests
         {
             if (owner == null) return;
             // This runtime-only behaviour receives no automatic lifecycle callbacks in EditMode.
-            owner.SendMessage("OnDestroy", SendMessageOptions.RequireReceiver);
+            Call(owner.GetComponent<RegionInteraction>(), "OnDestroy");
             Object.DestroyImmediate(owner);
         }
         private static T Read<T>(object owner, string field) => (T)owner.GetType().GetField(field, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(owner);
