@@ -19,7 +19,8 @@ namespace GazeShift.Tests
             Material ownedFont = null;
             try
             {
-                owner.AddComponent<RegionInteraction>().Initialize(new UnavailableSource(), eye.transform);
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>();
+                interaction.Initialize(new UnavailableSource(), eye.transform);
                 TextMesh[] labels = eye.GetComponentsInChildren<TextMesh>();
                 Assert.AreEqual(2, labels.Length);
                 MeshRenderer button = null;
@@ -36,13 +37,14 @@ namespace GazeShift.Tests
                     else Assert.AreSame(ownedFont, textMaterial);
                 }
                 Assert.AreEqual(originalQueue, sharedFont.renderQueue);
-                Object.DestroyImmediate(owner);
+                Assert.AreSame(Read<Material>(interaction, "textMaterial"), ownedFont);
+                DestroyInteraction(owner);
                 Assert.IsTrue(ownedFont == null);
                 Assert.IsNotNull(sharedFont);
             }
             finally
             {
-                if (owner != null) Object.DestroyImmediate(owner);
+                DestroyInteraction(owner);
                 Object.DestroyImmediate(eye);
             }
         }
@@ -70,7 +72,7 @@ namespace GazeShift.Tests
                 Assert.IsNotNull(hud.Find("Instruction backplate"));
                 Assert.GreaterOrEqual(Read<TextMesh>(interaction, "instruction").characterSize, 0.027f);
             }
-            finally { UnityEngine.Object.DestroyImmediate(owner); UnityEngine.Object.DestroyImmediate(eye); }
+            finally { DestroyInteraction(owner); UnityEngine.Object.DestroyImmediate(eye); }
         }
         [Test] public void AcceptanceSelectsNewestCopyAndUndoDisposesItsPairedResources()
         {
@@ -104,7 +106,7 @@ namespace GazeShift.Tests
                 Assert.AreEqual(lineCount - 4, eye.GetComponentsInChildren<LineRenderer>().Length);
                 Assert.AreEqual(1, session.Accepted.Count);
             }
-            finally { UnityEngine.Object.DestroyImmediate(owner); UnityEngine.Object.DestroyImmediate(eye); UnityEngine.Object.DestroyImmediate(texture); }
+            finally { DestroyInteraction(owner); UnityEngine.Object.DestroyImmediate(eye); UnityEngine.Object.DestroyImmediate(texture); }
         }
         [Test] public void SourceGripBringsCopyToPointerWhileCopyGripPreservesOffsetAndInvalidMoveRollsBack()
         {
@@ -124,7 +126,7 @@ namespace GazeShift.Tests
                 Call(interaction, "DragTo", new Vector2(0.42f, 0));
                 Assert.IsNull(Read<string>(interaction, "actionInstruction"));
             }
-            finally { UnityEngine.Object.DestroyImmediate(owner); UnityEngine.Object.DestroyImmediate(eye); UnityEngine.Object.DestroyImmediate(texture); }
+            finally { DestroyInteraction(owner); UnityEngine.Object.DestroyImmediate(eye); UnityEngine.Object.DestroyImmediate(texture); }
         }
         [Test] public void OriginalViewCancelsGesturesAndRestoresOnlyFreshCoveredFrames()
         {
@@ -153,7 +155,14 @@ namespace GazeShift.Tests
                 Call(interaction, "OnApplicationFocus", false); Assert.IsFalse(view.IsVisible);
                 Assert.IsFalse(Read<InteractionFeedback>(interaction, "feedback").IsPulsing(Time.unscaledTime));
             }
-            finally { UnityEngine.Object.DestroyImmediate(owner); UnityEngine.Object.DestroyImmediate(eye); UnityEngine.Object.DestroyImmediate(texture); }
+            finally { DestroyInteraction(owner); UnityEngine.Object.DestroyImmediate(eye); UnityEngine.Object.DestroyImmediate(texture); }
+        }
+        private static void DestroyInteraction(GameObject owner)
+        {
+            if (owner == null) return;
+            // This runtime-only behaviour receives no automatic lifecycle callbacks in EditMode.
+            owner.SendMessage("OnDestroy", SendMessageOptions.RequireReceiver);
+            Object.DestroyImmediate(owner);
         }
         private static T Read<T>(object owner, string field) => (T)owner.GetType().GetField(field, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(owner);
         private static object Call(object owner, string method, params object[] arguments) => owner.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic).Invoke(owner, arguments);
