@@ -248,13 +248,48 @@ namespace GazeShift.Tests
                 Call(interaction, "AcceptRegions"); RegionData accepted = session.Accepted[0];
                 session.BeginTrigger(false); session.AddPoint(Vector2.zero); session.AddPoint(new Vector2(0.1f, 0));
                 Assert.IsFalse(session.FinishStroke()); Call(interaction, "UpdateStrokeOutline");
-                foreach (LineRenderer line in eye.GetComponentsInChildren<LineRenderer>())
-                    if (line.gameObject.name == "Current stroke inner") { Assert.IsTrue(line.enabled); Assert.AreEqual(2, line.positionCount); }
+                LineRenderer stroke = FindLineRenderer(eye.transform, "Current stroke inner");
+                Assert.IsTrue(stroke.enabled); Assert.AreEqual(2, stroke.positionCount);
                 StringAssert.Contains("resume", (string)Call(interaction, "StageInstruction"));
                 Call(interaction, "UndoLastRegion"); Assert.AreEqual(1, session.Accepted.Count); Assert.AreSame(accepted, Read<RegionData>(interaction, "selected"));
                 Assert.IsEmpty(session.Stroke); Call(interaction, "UndoLastRegion"); Assert.IsEmpty(session.Accepted);
             }
             finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
+        [Test] public void RejectedTriggerReleaseShowsRecoveryGuidanceInDisplayedFailureInstruction()
+        {
+            var owner = new GameObject("Release instruction UI test"); var eye = new GameObject("Test eye");
+            Type inputType = null;
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+                if ((inputType = assembly.GetType("OVRInput")) != null) break;
+            Assert.IsNotNull(inputType);
+            FieldInfo controllersField = inputType.GetField("controllers", BindingFlags.Public | BindingFlags.Static);
+            object originalControllers = controllersField.GetValue(null);
+            try
+            {
+                // Use the real SDK maps without adding an SDK reference to the test assembly or polling native input.
+                Type rightType = inputType.GetNestedType("OVRControllerRTouch", BindingFlags.NonPublic);
+                object right = Activator.CreateInstance(rightType, true);
+                FieldInfo previousStateField = rightType.GetField("previousState");
+                object previousState = previousStateField.GetValue(right);
+                Type rawButtonType = inputType.GetNestedType("RawButton");
+                uint triggerBit = Convert.ToUInt32(Enum.Parse(rawButtonType, "RIndexTrigger"));
+                previousState.GetType().GetField("Buttons").SetValue(previousState, triggerBit);
+                previousStateField.SetValue(right, previousState);
+                var controllers = (System.Collections.IList)Activator.CreateInstance(controllersField.FieldType);
+                controllers.Add(right); controllersField.SetValue(null, controllers);
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new UnavailableSource(), eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); session.BeginTrigger(false);
+                session.AddPoint(Vector2.zero); session.AddPoint(new Vector2(0.1f, 0));
+                Call(interaction, "HandleStroke", true, new Vector2(0.1f, 0));
+                Assert.IsFalse(session.IsDrawing); Assert.AreEqual(2, session.Stroke.Count);
+                string failureInstruction = Read<string>(interaction, "actionInstruction");
+                Assert.IsNotNull(failureInstruction);
+                Call(interaction, "SetInstruction", failureInstruction);
+                StringAssert.Contains("resume", Read<TextMesh>(interaction, "instruction").text);
+                StringAssert.Contains("B: discard", Read<TextMesh>(interaction, "instruction").text);
+            }
+            finally { controllersField.SetValue(null, originalControllers); DestroyInteraction(owner); Object.DestroyImmediate(eye); }
         }
         [Test] public void ClosureRingMatchesThresholdAndPulseCanReenterAfterLeavingZone()
         {
@@ -265,8 +300,8 @@ namespace GazeShift.Tests
                 RegionSession session = Read<RegionSession>(interaction, "session"); session.BeginTrigger(false);
                 foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.1f, 0), new Vector2(0.1f, 0.1f), new Vector2(0, 0.1f), new Vector2(0, 0.04f) }) session.AddPoint(point);
                 Call(interaction, "UpdateStrokeOutline"); Assert.IsTrue(Read<bool>(interaction, "closureSignaled"));
-                foreach (LineRenderer line in eye.GetComponentsInChildren<LineRenderer>())
-                    if (line.gameObject.name == "Stroke start ring inner") Assert.AreEqual(0.04579214f, line.GetPosition(0).x, 0.000001f);
+                LineRenderer ring = FindLineRenderer(eye.transform, "Stroke start ring inner");
+                Assert.AreEqual(0.04579214f, ring.GetPosition(0).x, 0.000001f);
                 session.AddPoint(new Vector2(-0.05f, 0.05f)); Call(interaction, "UpdateStrokeOutline"); Assert.IsFalse(Read<bool>(interaction, "closureSignaled"));
                 session.AddPoint(new Vector2(-0.02f, 0.02f)); Call(interaction, "UpdateStrokeOutline"); Assert.IsTrue(Read<bool>(interaction, "closureSignaled"));
                 Assert.IsTrue(Read<InteractionFeedback>(interaction, "feedback").IsPulsing(Time.unscaledTime));
@@ -291,6 +326,14 @@ namespace GazeShift.Tests
                 StringAssert.Contains("Keep copies", Read<string>(interaction, "actionInstruction"));
             }
             finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
+        private static LineRenderer FindLineRenderer(Transform parent, string name)
+        {
+            var matches = new List<LineRenderer>();
+            foreach (LineRenderer line in parent.GetComponentsInChildren<LineRenderer>())
+                if (line.gameObject.name == name) matches.Add(line);
+            Assert.AreEqual(1, matches.Count, "Expected exactly one renderer named " + name);
+            return matches[0];
         }
         private static void AssertPairHiddenAndUnbound(LiveRegionView view)
         {

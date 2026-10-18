@@ -133,7 +133,9 @@ namespace GazeShift
             }
             // Establish every original scale1 fallback before spending remaining work on preferences.
             // A failed headroom probe leaves its established pose and boundary unchanged.
-            for (int i = 0; i < Pending.Count; i++) FindHeadroomDestination(Pending[i]);
+            var headroomPlacements = new HashSet<RegionData>();
+            for (int i = 0; i < Pending.Count; i++)
+                if (FindHeadroomDestination(Pending[i], headroomPlacements)) headroomPlacements.Add(Pending[i]);
             Accepted.AddRange(Pending); Pending.Clear();
             return true;
         }
@@ -161,7 +163,7 @@ namespace GazeShift
             }
             return false;
         }
-        private bool FindHeadroomDestination(RegionData region)
+        private bool FindHeadroomDestination(RegionData region, ISet<RegionData> headroomPlacements = null)
         {
             Vector2 range = CanvasHalfExtent - region.SourceHalfExtent * InitialHeadroomScale - Vector2.one * PlacementGap;
             if (range.x < 0 || range.y < 0) return false;
@@ -180,11 +182,11 @@ namespace GazeShift
             for (int i = 0; i < candidates.Length && remainingAcceptanceChecks > 0; i++)
             {
                 LastPlacementAttempts++;
-                if (HasHeadroom(region, candidates[i]) && TryPlace(region, candidates[i], 1, ref remainingAcceptanceChecks)) return true;
+                if (HasHeadroom(region, candidates[i], headroomPlacements) && TryPlace(region, candidates[i], 1, ref remainingAcceptanceChecks)) return true;
             }
             return false;
         }
-        private bool HasHeadroom(RegionData region, Vector2 center)
+        private bool HasHeadroom(RegionData region, Vector2 center, ISet<RegionData> headroomPlacements)
         {
             Vector2 half = region.SourceHalfExtent * InitialHeadroomScale;
             if (Math.Abs(center.x) + half.x > CanvasHalfExtent.x || Math.Abs(center.y) + half.y > CanvasHalfExtent.y) return false;
@@ -200,7 +202,12 @@ namespace GazeShift
             {
                 RegionData other = Pending[i];
                 if (!BoundsClear(center, half, other.SourceCenter, other.SourceHalfExtent)) return false;
-                if (other != region && other.HasPlacement && !BoundsClear(center, half, other.Destination, other.SourceHalfExtent * other.Scale)) return false;
+                if (other == region || !other.HasPlacement) continue;
+                if (!BoundsClear(center, half, other.Destination, other.SourceHalfExtent * other.Scale)) return false;
+                // Mixed-size copies can clear another's current boundary but intrude its reserved growth envelope.
+                // Preserve earlier preference clearance using this candidate's current scale1 footprint.
+                if (headroomPlacements != null && headroomPlacements.Contains(other) &&
+                    !BoundsClear(center, region.SourceHalfExtent, other.Destination, other.SourceHalfExtent * InitialHeadroomScale)) return false;
             }
             return true;
         }

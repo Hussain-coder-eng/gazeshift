@@ -186,7 +186,7 @@ namespace GazeShift
                 }
             }
             if (!OVRInput.GetUp(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch) || !session.IsDrawing) return;
-            if (!session.FinishStroke()) ShowActionInstruction(BlockedAction.Stroke, "Trace a larger loop away from copies.\nReturn to start, then release.");
+            if (!session.FinishStroke()) ShowActionInstruction(BlockedAction.Stroke, "Hold right trigger to resume this loop.\nB: discard trace; draw away from copies.");
             else ClearActionInstruction(BlockedAction.Stroke);
             SyncOutlines();
         }

@@ -181,6 +181,30 @@ namespace GazeShift.Tests
             Assert.IsTrue(session.TryPlace(region, center, 0.5f)); Assert.AreEqual(center, region.Destination);
             CollectionAssert.AreEqual(source, region.Source);
         }
+        [Test] public void MixedSizePendingCopiesEachKeepIndependentEnlargementHeadroom()
+        {
+            var session = new RegionSession();
+            Vector2[][] boundaries = {
+                new[] { new Vector2(0.20f, -0.10f), new Vector2(0.40f, -0.10f), new Vector2(0.40f, 0.10f), new Vector2(0.20f, 0.10f) },
+                new[] { new Vector2(-0.295f, -0.04f), new Vector2(-0.215f, -0.04f), new Vector2(-0.215f, 0.04f), new Vector2(-0.295f, 0.04f) }
+            };
+            foreach (Vector2[] boundary in boundaries)
+            {
+                session.BeginTrigger(false);
+                foreach (Vector2 point in boundary) session.AddPoint(point);
+                session.AddPoint(boundary[0]); Assert.IsTrue(session.FinishStroke());
+            }
+            Assert.IsTrue(session.AcceptPending()); Assert.AreEqual(2, session.Accepted.Count);
+            for (int i = 0; i < session.Accepted.Count; i++)
+            {
+                RegionData region = session.Accepted[i]; Vector2 center = region.Destination;
+                Vector2[] source = (Vector2[])region.Source.Clone(); Vector2[] copy = (Vector2[])region.CopyBoundary.Clone();
+                foreach (RegionData other in session.Accepted) Assert.AreEqual(1, other.Scale);
+                Assert.IsTrue(session.TryPlace(region, center, 1.25f), "Final copy " + i + " lost its independent enlargement clearance.");
+                Assert.AreEqual(center, region.Destination); CollectionAssert.AreEqual(source, region.Source);
+                Assert.IsTrue(session.TryPlace(region, center, 1)); CollectionAssert.AreEqual(copy, region.CopyBoundary);
+            }
+        }
         [Test] public void ConcaveInitialCopyHasClearanceAcrossEnlargementPathAndPreservesNotch()
         {
             var session = new RegionSession(); session.BeginTrigger(false);
