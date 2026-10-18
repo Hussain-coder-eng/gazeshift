@@ -23,6 +23,20 @@ namespace GazeShift
         private const int TextRenderQueue = 3020;
         private const int InstructionColumns = 38;
         private const int RingSegments = 24;
+        private const float HudInitialY = -0.08f;
+        private const float HudDepth = -0.015f;
+        private const float TextDepthOffset = -0.005f;
+        private const float AcceptDepth = -0.001f;
+        private const float InstructionY = 0.055f;
+        private const float AcceptY = -0.08f;
+        private const float InstructionWidth = 0.60f;
+        private const float InstructionHeight = 0.08f;
+        private const float AcceptWidth = 0.28f;
+        private const float AcceptHeight = 0.07f;
+        private const float AcceptHorizontalPadding = 0.02f;
+        private const float AcceptVerticalPadding = 0.0125f;
+        private const float ContrastPadding = 0.012f;
+        private const float GlyphFitMargin = 0.99f;
         private const string CoverageInstruction = "Draw nearer the center of the view.\nHold left X: original view.";
         private enum BlockedAction { None, Stroke, Acceptance, Movement }
         private readonly RegionSession session = new RegionSession();
@@ -36,6 +50,10 @@ namespace GazeShift
         private Transform plane;
         private Transform hud;
         private TextMesh instruction;
+        private TextMesh acceptLabel;
+        private Transform instructionBackplate;
+        private bool fittingHud;
+        private bool hudFitPending;
         private BoxCollider acceptCollider;
         private OutlinePair strokeLine;
         private OutlinePair endpoint;
@@ -87,10 +105,12 @@ namespace GazeShift
             plane = new GameObject("Head-relative drawing plane").transform;
             plane.SetParent(centerEye, false); plane.localPosition = Vector3.forward * CanvasDistance;
             hud = new GameObject("Movable instructions and Accept").transform;
-            hud.SetParent(plane, false); hud.localPosition = new Vector3(0, 0.29f, -0.015f);
-            CreateBackplate("Instruction backplate", new Vector3(0, 0.055f, 0), new Vector3(0.76f, 0.15f, 1));
-            instruction = CreateText("Instructions", StageInstruction(), new Vector3(0, 0.055f, -0.005f), 0.027f);
+            hud.SetParent(plane, false); hud.localPosition = new Vector3(0, HudInitialY, HudDepth);
+            instructionBackplate = CreateBackplate("Instruction backplate", new Vector3(0, InstructionY, 0), Vector3.one).transform;
+            instruction = CreateText("Instructions", StageInstruction(), new Vector3(0, InstructionY, TextDepthOffset), 0.027f);
             CreateAcceptButton();
+            SetInstruction(StageInstruction());
+            FitHud();
             strokeLine = CreateOutline("Current stroke");
             startRing = CreateOutline("Stroke start ring"); endpoint = CreateOutline("Controller endpoint");
             rayLine = CreateLine("Right controller ray", true, outlineMaterial);
@@ -363,6 +383,7 @@ namespace GazeShift
                 }
             }
             instruction.text = wrapped.ToString();
+            hudFitPending = true; FitHud();
         }
         private void Pulse(float amplitude, float duration)
         {
@@ -407,7 +428,41 @@ namespace GazeShift
         }
         private void RefreshFontTexture(Font font)
         {
-            if (font == textFont && textMaterial != null) textMaterial.mainTexture = font.material.mainTexture;
+            if (font != textFont || textMaterial == null) return;
+            textMaterial.mainTexture = font.material.mainTexture;
+            // Unity can notify before rebuilding TextMesh geometry; retry after the rebuild as well.
+            FitHud(); hudFitPending = true;
+        }
+        private void LateUpdate() { if (hudFitPending) FitHud(); }
+        private void FitHud()
+        {
+            if (fittingHud || instruction == null || acceptLabel == null) return;
+            fittingHud = true;
+            try
+            {
+                bool instructionFit = FitText(instruction, InstructionWidth, InstructionHeight, out Bounds measured);
+                bool acceptFit = FitText(acceptLabel, AcceptWidth - 2 * AcceptHorizontalPadding,
+                    AcceptHeight - 2 * AcceptVerticalPadding, out _);
+                hudFitPending = !instructionFit || !acceptFit;
+                if (!instructionFit) return;
+                Vector3 center = instruction.transform.localPosition + measured.center * instruction.transform.localScale.x;
+                center.z = instructionBackplate.localPosition.z;
+                instructionBackplate.localPosition = center;
+                instructionBackplate.localScale = new Vector3(measured.size.x * instruction.transform.localScale.x + 2 * ContrastPadding,
+                    measured.size.y * instruction.transform.localScale.y + 2 * ContrastPadding, 1);
+            }
+            finally { fittingHud = false; }
+        }
+        private static bool FitText(TextMesh label, float width, float height, out Bounds measured)
+        {
+            // Native measurements found 64px TextMesh glyphs metres wide at characterSize .027;
+            // fit the actual unscaled Renderer bounds, never treat characterSize as metres.
+            measured = label.GetComponent<Renderer>().localBounds;
+            Vector3 size = measured.size;
+            if (!RegionGeometry.IsFinite(new Vector2(size.x, size.y)) || size.x <= 0 || size.y <= 0) return false;
+            float scale = Mathf.Min(1f, Mathf.Min(width / size.x, height / size.y)) * GlyphFitMargin;
+            label.transform.localScale = Vector3.one * scale;
+            return true;
         }
         private LineRenderer CreateLine(string name, bool worldSpace, Material material)
         {
@@ -443,7 +498,7 @@ namespace GazeShift
                 Font.textureRebuilt += RefreshFontTexture;
             }
             label.font = textFont; label.GetComponent<MeshRenderer>().sharedMaterial = textMaterial;
-            label.fontSize = 64; label.characterSize = size; label.color = Color.white;
+            label.fontSize = 64; label.characterSize = size; label.lineSpacing = 1f; label.color = Color.white;
             return label;
         }
         private GameObject CreateBackplate(string name, Vector3 position, Vector3 scale)
@@ -456,10 +511,10 @@ namespace GazeShift
         }
         private void CreateAcceptButton()
         {
-            Vector3 position = new Vector3(0, -0.08f, -0.001f);
-            GameObject button = CreateBackplate("Accept regions", position, new Vector3(0.28f, 0.07f, 1));
+            Vector3 position = new Vector3(0, AcceptY, AcceptDepth);
+            GameObject button = CreateBackplate("Accept regions", position, new Vector3(AcceptWidth, AcceptHeight, 1));
             acceptCollider = button.AddComponent<BoxCollider>(); acceptCollider.size = new Vector3(1, 1, 0.01f);
-            CreateText("Accept regions label", "Accept regions", position + Vector3.back * 0.005f, 0.031f);
+            acceptLabel = CreateText("Accept regions label", "Accept regions", position + Vector3.forward * TextDepthOffset, 0.031f);
         }
     }
 }

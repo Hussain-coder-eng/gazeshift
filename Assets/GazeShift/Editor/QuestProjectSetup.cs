@@ -30,6 +30,7 @@ namespace GazeShift.Editor
             PlayerSettings.companyName = "GazeShift";
             PlayerSettings.productName = "GazeShift";
             PlayerSettings.SplashScreen.show = false;
+            PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
             PlayerSettings.bundleVersion = "0.1.0";
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.gazeshift.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);

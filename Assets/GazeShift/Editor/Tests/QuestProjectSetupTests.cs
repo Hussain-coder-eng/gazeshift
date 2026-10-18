@@ -14,6 +14,17 @@ namespace GazeShift.Editor.Tests
 {
     public sealed class QuestProjectSetupTests
     {
+        [Test] public void ConfigureSynchronouslyReplacesAutoRotationWithLandscapeLeft()
+        {
+            UIOrientation before = PlayerSettings.defaultInterfaceOrientation;
+            try
+            {
+                PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
+                QuestProjectSetup.Configure();
+                Assert.AreEqual(UIOrientation.LandscapeLeft, PlayerSettings.defaultInterfaceOrientation);
+            }
+            finally { PlayerSettings.defaultInterfaceOrientation = before; AssetDatabase.SaveAssets(); }
+        }
         [Test]
         public void ConfigureCreatesCompleteAndroidConfigurationAndIsRepeatable()
         {

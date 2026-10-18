@@ -27,7 +27,8 @@ namespace GazeShift
                 eye.backgroundColor = Color.clear;
                 eye.nearClipPlane = NearClipMeters;
             }
-            rigObject.AddComponent<OVRPassthroughLayer>().overlayType = OVROverlay.OverlayType.Underlay;
+            var passthrough = rigObject.AddComponent<OVRPassthroughLayer>();
+            passthrough.overlayType = OVROverlay.OverlayType.Underlay;
             var source = rigObject.AddComponent<QuestCameraSource>();
             var cameraAccess = rigObject.GetComponent<Meta.XR.PassthroughCameraAccess>();
             cameraAccess.enabled = false;
@@ -37,6 +38,7 @@ namespace GazeShift
             cameraAccess.enabled = true;
             rigObject.SetActive(true);
             gameObject.AddComponent<RegionInteraction>().Initialize(source, rig.centerEyeAnchor);
+            gameObject.AddComponent<QuestStartupDiagnostics>().Initialize(rig, passthrough);
         }
     }
 }

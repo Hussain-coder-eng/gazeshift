@@ -70,7 +70,7 @@ namespace GazeShift.Tests
                 Call(interaction, "BeginTrigger", ray);
                 Assert.IsFalse(Read<RegionSession>(interaction, "session").IsDrawing);
                 Assert.IsNotNull(hud.Find("Instruction backplate"));
-                Assert.GreaterOrEqual(Read<TextMesh>(interaction, "instruction").characterSize, 0.027f);
+                Assert.Greater(Read<TextMesh>(interaction, "instruction").GetComponent<Renderer>().bounds.size.y, 0f);
             }
             finally { DestroyInteraction(owner); UnityEngine.Object.DestroyImmediate(eye); }
         }
@@ -326,6 +326,163 @@ namespace GazeShift.Tests
                 StringAssert.Contains("Keep copies", Read<string>(interaction, "actionInstruction"));
             }
             finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
+        // Removing fit/refit or restoring the old glyph size must fail on real rendered bounds.
+        [Test] public void MeasuredHudFitsAllInstructionsAndFontRefreshWithoutScalingDrift()
+        {
+            var owner = new GameObject("Measured HUD test"); var eye = new GameObject("Test eye");
+            try
+            {
+                Camera camera = eye.AddComponent<Camera>(); camera.enabled = false;
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>();
+                interaction.Initialize(new UnavailableSource(), eye.transform);
+                TextMesh instruction = Read<TextMesh>(interaction, "instruction");
+                TextMesh accept = eye.transform.Find("Head-relative drawing plane/Movable instructions and Accept/Accept regions label").GetComponent<TextMesh>();
+                var failures = new List<string>();
+                var samples = new List<string>(InstructionSamples);
+                foreach (string direction in new[] { "center", "upper", "lower", "left", "right", "upper left", "upper right", "lower left", "lower right" })
+                    samples.Add("Copy selected: " + direction + ".\nRight stick: resize. Grip: move.");
+                foreach (string text in samples)
+                {
+                    Call(interaction, "SetInstruction", text); camera.Render();
+                    Bounds bounds = instruction.GetComponent<Renderer>().bounds;
+                    Debug.Log("HUD MEASURE " + text.Replace('\n', '|') + " size=" + bounds.size.ToString("F6") + " center=" + bounds.center.ToString("F6"));
+                    AssertFiniteNonzero(bounds);
+                    if (bounds.size.x > 0.6001f || bounds.size.y > 0.0801f) failures.Add(text);
+                    Bounds plate = instruction.transform.parent.Find("Instruction backplate").GetComponent<Renderer>().bounds;
+                    Assert.Greater(bounds.min.x, plate.min.x); Assert.Less(bounds.max.x, plate.max.x);
+                    Assert.Greater(bounds.min.y, plate.min.y); Assert.Less(bounds.max.y, plate.max.y);
+                    Bounds button = accept.GetComponent<Renderer>().bounds;
+                    AssertFiniteNonzero(button);
+                    if (bounds.min.y <= button.max.y) failures.Add("Overlap: " + text);
+                }
+                Bounds labelBounds = accept.GetComponent<Renderer>().bounds;
+                Debug.Log("ACCEPT MEASURE size=" + labelBounds.size.ToString("F6"));
+                AssertFiniteNonzero(labelBounds);
+                Assert.LessOrEqual(labelBounds.size.x, 0.2401f); Assert.LessOrEqual(labelBounds.size.y, 0.0451f);
+                Transform outer = Read<BoxCollider>(interaction, "acceptCollider").transform;
+                Assert.AreEqual(0.28f, outer.GetComponent<Renderer>().bounds.size.x, 0.0001f);
+                Assert.AreEqual(0.07f, outer.GetComponent<Renderer>().bounds.size.y, 0.0001f);
+                Assert.GreaterOrEqual(labelBounds.min.x, outer.GetComponent<Renderer>().bounds.min.x);
+                Assert.LessOrEqual(labelBounds.max.y, outer.GetComponent<Renderer>().bounds.max.y);
+                Call(interaction, "SetInstruction", InstructionSamples[0]); camera.Render();
+                Vector3 fitted = instruction.transform.localScale;
+                // Simulate an atlas rebuild after invalidated label scale; callback must refit both labels.
+                instruction.transform.localScale = Vector3.one; accept.transform.localScale = Vector3.one;
+                Call(interaction, "RefreshFontTexture", instruction.font); camera.Render();
+                Assert.AreEqual(fitted.x, instruction.transform.localScale.x, 0.00001f);
+                // Texture notifications can precede geometry replacement. LateUpdate must fit that replacement.
+                float instructionSize = instruction.characterSize, acceptSize = accept.characterSize;
+                instruction.characterSize *= 2; accept.characterSize *= 2;
+                Call(interaction, "LateUpdate"); camera.Render();
+                Assert.LessOrEqual(instruction.GetComponent<Renderer>().bounds.size.y, 0.0801f);
+                Assert.LessOrEqual(accept.GetComponent<Renderer>().bounds.size.x, 0.2401f);
+                instruction.characterSize = instructionSize; accept.characterSize = acceptSize;
+                for (int i = 0; i < 3; i++) Call(interaction, "RefreshFontTexture", instruction.font);
+                Assert.AreEqual(fitted.x, instruction.transform.localScale.x, 0.00001f);
+                Assert.LessOrEqual(accept.GetComponent<Renderer>().bounds.size.x, 0.2401f);
+                Assert.IsEmpty(failures, string.Join("; ", failures));
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); }
+        }
+        [Test] public void DefaultHudCentersSitBelowEyeAndBackplateContainsMeasuredGlyphs()
+        {
+            var owner = new GameObject("HUD layout test"); var eye = new GameObject("Test eye");
+            try
+            {
+                var camera = eye.AddComponent<Camera>(); camera.enabled = false;
+                var interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new UnavailableSource(), eye.transform);
+                camera.Render();
+                Transform hud = Read<Transform>(interaction, "hud");
+                Assert.AreEqual(-0.08f, hud.localPosition.y, 0.0001f);
+                TextMesh instruction = Read<TextMesh>(interaction, "instruction");
+                Assert.AreEqual(0.055f, instruction.transform.localPosition.y, 0.0001f);
+                Assert.AreEqual(-0.08f, Read<BoxCollider>(interaction, "acceptCollider").transform.localPosition.y, 0.0001f);
+                Bounds text = instruction.GetComponent<Renderer>().bounds; AssertFiniteNonzero(text);
+                Bounds backplate = hud.Find("Instruction backplate").GetComponent<Renderer>().bounds;
+                Assert.Greater(text.min.x, backplate.min.x); Assert.Less(text.max.x, backplate.max.x);
+                Assert.Greater(text.min.y, backplate.min.y); Assert.Less(text.max.y, backplate.max.y);
+                Assert.AreEqual(-1.5f, Mathf.Atan2(instruction.transform.position.y, instruction.transform.position.z) * Mathf.Rad2Deg, 0.15f);
+                Transform button = Read<BoxCollider>(interaction, "acceptCollider").transform;
+                Assert.AreEqual(-9.2f, Mathf.Atan2(button.position.y, button.position.z) * Mathf.Rad2Deg, 0.15f);
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); }
+        }
+        private static void AssertFiniteNonzero(Bounds bounds)
+        {
+            Assert.IsFalse(float.IsNaN(bounds.size.x) || float.IsInfinity(bounds.size.x));
+            Assert.IsFalse(float.IsNaN(bounds.size.y) || float.IsInfinity(bounds.size.y));
+            Assert.Greater(bounds.size.x, 0f); Assert.Greater(bounds.size.y, 0f);
+        }
+        private static readonly string[] InstructionSamples =
+        {
+            "Hold right trigger: trace a loop.\nLeft stick: move this panel.",
+            "Loop ready: release right trigger.\nB: undo. Hold left X: original view.",
+            "Return to the start ring; release.\nB: undo. Hold left X: original view.",
+            "Hold right trigger to resume this loop.\nB: discard trace. Return to start ring.",
+            "Press A or Accept regions.\nB: undo. Left stick: move this panel.",
+            "Right stick: resize. Grip: move.\nB: undo. Hold left X: original view.",
+            "Grip a source or copy to move it.\nLeft stick: panel. Hold left X: original.",
+            "Draw nearer the center of the view.\nHold left X: original view.",
+            "Keep GazeShift open; wait for camera.",
+            "Wear headset to resume the live view.\nLeft stick: move this panel.",
+            "Allow camera access in Quest settings; reopen GazeShift.\nLeft stick: move this panel.",
+            "Camera unavailable. Close and reopen GazeShift.\nLeft stick: move this panel.",
+            "Use Quest 3 or 3S with Horizon OS v81 or newer.\nLeft stick: move this panel.",
+            "Allow camera access in Quest settings, then reopen GazeShift.\nLeft stick: move this panel.",
+            "Keep GazeShift open and wait for the camera.\nLeft stick: move this panel.",
+            "Original view: release left X to return.\nLeft stick: move this panel.",
+            "Connect right controller to draw or move.\nLeft stick: panel. Hold left X: original.",
+            "Loop too long. Trace a shorter loop.\nPress trigger again to restart.",
+            "Hold right trigger to resume this loop.\nB: discard trace; draw away from copies.",
+            "Move copy into open space to enlarge.\nStick down: shrink.",
+            "Keep copies inside the view and apart.\nMove elsewhere or right stick down.",
+            "No room for a full-size copy.\nB: undo; trace a smaller region.",
+            "Copy selected: upper right.\nRight stick: resize. Grip: move."
+        };
+        [Test] public void StartupDiagnosticsNeedsTwoDistinctEligibleFramesAndCompletesOnce()
+        {
+            var type = typeof(RegionInteraction).Assembly.GetType("GazeShift.QuestStartupDiagnostics");
+            Assert.IsNotNull(type, "Startup diagnostics component is missing.");
+            var owner = new GameObject("Diagnostics frame test");
+            try
+            {
+                Component diagnostic = owner.AddComponent(type);
+                Call(diagnostic, "Subscribe"); Assert.IsTrue(Read<bool>(diagnostic, "subscribed"));
+                Assert.IsFalse((bool)Call(diagnostic, "TryCompleteFrame", 10, false));
+                Assert.IsFalse((bool)Call(diagnostic, "TryCompleteFrame", 11, true));
+                Assert.IsFalse((bool)Call(diagnostic, "TryCompleteFrame", 11, true));
+                Assert.IsTrue((bool)Call(diagnostic, "TryCompleteFrame", 12, true));
+                Assert.IsFalse((bool)Call(diagnostic, "TryCompleteFrame", 13, true));
+                Assert.IsFalse(Read<bool>(diagnostic, "subscribed"));
+            }
+            finally { Object.DestroyImmediate(owner); }
+        }
+        [Test] public void StartupDiagnosticsTimesOutFromUpdateWithoutCameraCallbacksAndUnsubscribesOnDisable()
+        {
+            var type = typeof(RegionInteraction).Assembly.GetType("GazeShift.QuestStartupDiagnostics");
+            Assert.IsNotNull(type, "Startup diagnostics component is missing.");
+            var owner = new GameObject("Diagnostics timeout test");
+            try
+            {
+                Component diagnostic = owner.AddComponent(type);
+                Call(diagnostic, "Subscribe");
+                Write(diagnostic, "startedAt", Time.realtimeSinceStartupAsDouble - 16d);
+                Call(diagnostic, "Update");
+                Assert.IsTrue(Read<bool>(diagnostic, "completed"));
+                Assert.IsFalse(Read<bool>(diagnostic, "subscribed"));
+                Call(diagnostic, "Update");
+                Assert.IsFalse((bool)Call(diagnostic, "TryCompleteFrame", 20, true));
+            }
+            finally { Object.DestroyImmediate(owner); }
+            var second = new GameObject("Diagnostics disable test");
+            try
+            {
+                Component diagnostic = second.AddComponent(type); Call(diagnostic, "Subscribe");
+                Call(diagnostic, "OnDisable"); Assert.IsFalse(Read<bool>(diagnostic, "subscribed"));
+                Assert.IsFalse((bool)Call(diagnostic, "TryCompleteFrame", 20, true));
+            }
+            finally { Object.DestroyImmediate(second); }
         }
         private static LineRenderer FindLineRenderer(Transform parent, string name)
         {
