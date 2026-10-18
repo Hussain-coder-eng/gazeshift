@@ -291,6 +291,125 @@ namespace GazeShift.Tests
             }
             finally { controllersField.SetValue(null, originalControllers); DestroyInteraction(owner); Object.DestroyImmediate(eye); }
         }
+        // Leaving Stroke feedback set on resume masks real HUD readiness despite a valid candidate.
+        [Test] public void FailedReleaseThenTriggerResumeDisplaysCurrentDrawingAndReadyGuidance()
+        {
+            var owner = new GameObject("Resume HUD test"); var eye = new GameObject("Test eye");
+            Type inputType = null;
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+                if ((inputType = assembly.GetType("OVRInput")) != null) break;
+            Assert.IsNotNull(inputType);
+            FieldInfo controllersField = inputType.GetField("controllers", BindingFlags.Public | BindingFlags.Static);
+            object originalControllers = controllersField.GetValue(null);
+            try
+            {
+                Type rightType = inputType.GetNestedType("OVRControllerRTouch", BindingFlags.NonPublic);
+                object right = Activator.CreateInstance(rightType, true);
+                FieldInfo previousStateField = rightType.GetField("previousState");
+                object previousState = previousStateField.GetValue(right);
+                uint triggerBit = Convert.ToUInt32(Enum.Parse(inputType.GetNestedType("RawButton"), "RIndexTrigger"));
+                previousState.GetType().GetField("Buttons").SetValue(previousState, triggerBit);
+                previousStateField.SetValue(right, previousState);
+                var controllers = (System.Collections.IList)Activator.CreateInstance(controllersField.FieldType);
+                controllers.Add(right); controllersField.SetValue(null, controllers);
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new UnavailableSource(), eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); session.BeginTrigger(false);
+                session.AddPoint(Vector2.zero); session.AddPoint(new Vector2(0.1f, 0));
+                Call(interaction, "HandleStroke", true, new Vector2(0.1f, 0));
+                Assert.IsFalse(session.IsDrawing); Assert.AreEqual(2, session.Stroke.Count);
+                DisplayCurrentInstruction(interaction);
+                StringAssert.Contains("resume", Read<TextMesh>(interaction, "instruction").text);
+                Call(interaction, "BeginTrigger", new Ray(Vector3.zero, Vector3.forward));
+                Assert.IsTrue(session.IsDrawing); Assert.AreEqual(2, session.Stroke.Count);
+                DisplayCurrentInstruction(interaction);
+                string drawingInstruction = Read<TextMesh>(interaction, "instruction").text;
+                session.AddPoint(new Vector2(0.1f, 0.1f)); session.AddPoint(new Vector2(0, 0.1f)); session.AddPoint(Vector2.zero);
+                Assert.IsTrue(session.IsClosureReady); Call(interaction, "UpdateStrokeOutline");
+                DisplayCurrentInstruction(interaction);
+                StringAssert.Contains("Loop ready", Read<TextMesh>(interaction, "instruction").text);
+                StringAssert.Contains("Return to the start ring", drawingInstruction);
+            }
+            finally { controllersField.SetValue(null, originalControllers); DestroyInteraction(owner); Object.DestroyImmediate(eye); }
+        }
+        [Test] public void SmallLoopRingRetainsItsActualRadiusAcrossReleaseAndResume()
+        {
+            var owner = new GameObject("Small closure ring test"); var eye = new GameObject("Test eye");
+            try
+            {
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new UnavailableSource(), eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); session.BeginTrigger(false);
+                foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.025f, 0), new Vector2(0.025f, 0.025f) }) session.AddPoint(point);
+                Call(interaction, "UpdateStrokeOutline");
+                LineRenderer ring = FindLineRenderer(eye.transform, "Stroke start ring inner");
+                Assert.AreEqual(0.008838835f, ring.GetPosition(0).x, 0.000001f);
+                Assert.AreEqual(session.ClosureRadius, ring.GetPosition(0).x, 0.000001f);
+                Assert.IsFalse(session.FinishStroke()); Call(interaction, "UpdateStrokeOutline");
+                Assert.IsTrue(ring.enabled); Assert.AreEqual(0.008838835f, ring.GetPosition(0).x, 0.000001f);
+                Assert.AreEqual(session.ClosureRadius, ring.GetPosition(0).x, 0.000001f);
+                Call(interaction, "BeginTrigger", new Ray(Vector3.zero, Vector3.forward));
+                session.AddPoint(new Vector2(0, 0.025f)); session.AddPoint(Vector2.zero); Call(interaction, "UpdateStrokeOutline");
+                Assert.IsTrue(session.IsClosureReady); Assert.AreEqual(0.008838835f, ring.GetPosition(0).x, 0.000001f);
+                Assert.AreEqual(session.ClosureRadius, ring.GetPosition(0).x, 0.000001f);
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); }
+        }
+        [TestCase("cancel")] [TestCase("discard")] [TestCase("acceptHit")] [TestCase("overflow")]
+        [TestCase("peek")] [TestCase("focus")] [TestCase("pause")] [TestCase("head")]
+        [TestCase("camera")] [TestCase("controller")] [TestCase("finished")]
+        public void FreshStrokeAfterResetHasSmallRingAndNoPreviousCandidate(string reset)
+        {
+            var owner = new GameObject("Closure reset test"); var eye = new GameObject("Test eye"); var texture = new Texture2D(2, 2);
+            try
+            {
+                var source = new LiveSource(texture);
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(source, eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); session.BeginTrigger(false);
+                foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.025f, 0), new Vector2(0.025f, 0.025f), new Vector2(0, 0.025f), Vector2.zero }) session.AddPoint(point);
+                Assert.IsTrue(session.IsClosureReady);
+                if (reset == "cancel") session.CancelStroke();
+                if (reset == "discard") Call(interaction, "UndoLastRegion");
+                if (reset == "acceptHit") session.BeginTrigger(true);
+                if (reset == "finished") Assert.IsTrue(session.FinishStroke());
+                if (reset == "overflow")
+                {
+                    for (int i = 0; i < RegionSession.MaximumSamples && session.IsDrawing; i++) session.AddPoint(new Vector2((i % 2) * 0.01f, -0.02f));
+                    Assert.IsTrue(session.StrokeOverflowed);
+                }
+                if (reset == "peek") Call(interaction, "SetOriginalView", true);
+                if (reset == "focus") Call(interaction, "OnApplicationFocus", false);
+                if (reset == "pause") Call(interaction, "OnApplicationPause", true);
+                if (reset == "head") Call(interaction, "UpdateAvailability", false, true, false);
+                if (reset == "camera") { source.Ready = false; Call(interaction, "UpdateAvailability", true, true, false); }
+                if (reset == "controller") Call(interaction, "UpdateAvailability", true, false, false);
+                Assert.IsFalse(session.IsDrawing); Assert.IsEmpty(session.Stroke); Assert.IsFalse(session.IsClosureReady);
+                session.BeginTrigger(false); session.AddPoint(new Vector2(-0.1f, 0)); Call(interaction, "UpdateStrokeOutline");
+                Assert.IsFalse(session.IsClosureReady); Assert.AreEqual(1, session.Stroke.Count);
+                Assert.AreEqual(-0.095f, FindLineRenderer(eye.transform, "Stroke start ring inner").GetPosition(0).x, 0.000001f,
+                    "Reset must clear the previous excursion as well as its cached polygon.");
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
+        [TestCase("Movement", false)] [TestCase("Acceptance", false)] [TestCase("Stroke", true)]
+        public void TriggerBeginKeepsUnrelatedFeedbackAndAcceptHitFeedback(string action, bool hitAccept)
+        {
+            var owner = new GameObject("Scoped feedback test"); var eye = new GameObject("Test eye");
+            try
+            {
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new UnavailableSource(), eye.transform);
+                Type actionType = typeof(RegionInteraction).GetNestedType("BlockedAction", BindingFlags.NonPublic);
+                Call(interaction, "ShowActionInstruction", Enum.Parse(actionType, action), "Existing action feedback");
+                Ray ray = hitAccept ? new Ray(Vector3.zero, Read<BoxCollider>(interaction, "acceptCollider").transform.position.normalized) : new Ray(Vector3.zero, Vector3.forward);
+                Call(interaction, "BeginTrigger", ray);
+                Assert.AreEqual("Existing action feedback", Read<string>(interaction, "actionInstruction"));
+                Assert.AreEqual(!hitAccept, Read<RegionSession>(interaction, "session").IsDrawing);
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); }
+        }
+        // Exercise the real HUD setter with Update's action-before-stage display priority.
+        private static void DisplayCurrentInstruction(RegionInteraction interaction)
+        {
+            Call(interaction, "SetInstruction", Read<string>(interaction, "actionInstruction") ?? (string)Call(interaction, "StageInstruction"));
+        }
         [Test] public void ClosureRingMatchesThresholdAndPulseCanReenterAfterLeavingZone()
         {
             var owner = new GameObject("Closure UI test"); var eye = new GameObject("Test eye");
@@ -298,10 +417,11 @@ namespace GazeShift.Tests
             {
                 RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new UnavailableSource(), eye.transform);
                 RegionSession session = Read<RegionSession>(interaction, "session"); session.BeginTrigger(false);
-                foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.1f, 0), new Vector2(0.1f, 0.1f), new Vector2(0, 0.1f), new Vector2(0, 0.04f) }) session.AddPoint(point);
+                foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.1f, 0), new Vector2(0.1f, 0.1f), new Vector2(0, 0.1f), new Vector2(0, 0.03f) }) session.AddPoint(point);
                 Call(interaction, "UpdateStrokeOutline"); Assert.IsTrue(Read<bool>(interaction, "closureSignaled"));
                 LineRenderer ring = FindLineRenderer(eye.transform, "Stroke start ring inner");
-                Assert.AreEqual(0.04579214f, ring.GetPosition(0).x, 0.000001f);
+                Assert.AreEqual(0.03535534f, ring.GetPosition(0).x, 0.000001f);
+                Assert.AreEqual(session.ClosureRadius, ring.GetPosition(0).x, 0.000001f);
                 session.AddPoint(new Vector2(-0.05f, 0.05f)); Call(interaction, "UpdateStrokeOutline"); Assert.IsFalse(Read<bool>(interaction, "closureSignaled"));
                 session.AddPoint(new Vector2(-0.02f, 0.02f)); Call(interaction, "UpdateStrokeOutline"); Assert.IsTrue(Read<bool>(interaction, "closureSignaled"));
                 Assert.IsTrue(Read<InteractionFeedback>(interaction, "feedback").IsPulsing(Time.unscaledTime));

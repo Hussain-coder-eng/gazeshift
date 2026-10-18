@@ -40,6 +40,10 @@ namespace GazeShift
         public const int MinimumSamples = 3;
         public const int MaximumSamples = 512;
         public const float ClosureDiagonalFraction = 0.03f;
+        // The open .04 m L closed inside the old global ring; quarter-excursion sizing
+        // requires a real return while preserving valid .025 m squares inside that ring.
+        private const float MinimumClosureRadius = 0.005f;
+        private const float ClosureExcursionFraction = 0.25f;
         public const float MinimumScale = 0.25f;
         public const float MaximumScale = 2;
         public const float SampleSpacing = 0.001f;
@@ -53,10 +57,13 @@ namespace GazeShift
         private const int AdjacentCandidateCount = 4;
         private Vector2[] closureVertices;
         private int[] closureTriangles;
+        private float maximumRadialExcursion;
+        private bool exitedClosureZone;
         private int remainingAcceptanceChecks;
         public static readonly Vector2 CanvasHalfExtent = new Vector2(0.65f, 0.4f);
         public bool IsDrawing { get; private set; }
-        public static float ClosureRadius => (CanvasHalfExtent * 2).magnitude * ClosureDiagonalFraction;
+        public static float MaximumClosureRadius => (CanvasHalfExtent * 2).magnitude * ClosureDiagonalFraction;
+        public float ClosureRadius => Mathf.Min(MaximumClosureRadius, Mathf.Max(MinimumClosureRadius, ClosureExcursionFraction * maximumRadialExcursion));
         public bool IsClosureReady => IsDrawing && closureVertices != null && !CoversAcceptedCopy(closureVertices);
         public bool StrokeOverflowed { get; private set; }
         internal int LastPlacementAttempts { get; private set; }
@@ -67,19 +74,29 @@ namespace GazeShift
         public void BeginTrigger(bool hitAccept)
         {
             if (hitAccept) CancelStroke();
-            else IsDrawing = true;
+            else
+            {
+                if (Stroke.Count == 0) ResetClosureState();
+                IsDrawing = true;
+            }
             StrokeOverflowed = false;
         }
         public void AddPoint(Vector2 point)
         {
             if (!IsDrawing || !RegionGeometry.IsFinite(point) || !InsideCanvas(point)) return;
-            // A sub-millimeter exit still ends readiness even when no new sample is stored.
-            if (Stroke.Count > 0 && (Stroke[0] - point).sqrMagnitude > ClosureRadius * ClosureRadius) ClearClosureCandidate();
+            // Update actual zone and exit state before spacing can hide a sub-millimeter exit.
+            bool outsideClosureZone = false;
+            if (Stroke.Count > 0)
+            {
+                float excursion = (point - Stroke[0]).magnitude;
+                maximumRadialExcursion = Mathf.Max(maximumRadialExcursion, excursion);
+                outsideClosureZone = excursion > ClosureRadius;
+                if (outsideClosureZone) { exitedClosureZone = true; ClearClosureCandidate(); }
+            }
             if (Stroke.Count > 0 && (point - Stroke[Stroke.Count - 1]).sqrMagnitude < SampleSpacing * SampleSpacing) return;
             if (Stroke.Count == MaximumSamples) { CancelStroke(); StrokeOverflowed = true; return; }
             Stroke.Add(point);
-            if ((Stroke[0] - point).sqrMagnitude > ClosureRadius * ClosureRadius)
-            { ClearClosureCandidate(); return; }
+            if (outsideClosureZone || !exitedClosureZone) return;
             if (Stroke.Count >= MinimumSamples && RegionGeometry.TryTriangulate(Stroke, out Vector2[] vertices, out int[] indices) && !CoversAcceptedCopy(vertices))
             { closureVertices = vertices; closureTriangles = indices; }
             // Keep the last simple prefix for small in-ring release overshoots only.
@@ -92,7 +109,11 @@ namespace GazeShift
                 if (RegionGeometry.Overlaps(vertices, Accepted[i].CopyBoundary)) return true;
             return false;
         }
-        public void CancelStroke() { IsDrawing = false; Stroke.Clear(); ClearClosureCandidate(); }
+        private void ResetClosureState()
+        {
+            ClearClosureCandidate(); maximumRadialExcursion = 0; exitedClosureZone = false;
+        }
+        public void CancelStroke() { IsDrawing = false; Stroke.Clear(); ResetClosureState(); }
         public bool FinishStroke()
         {
             if (!IsClosureReady) { IsDrawing = false; return false; }

@@ -191,6 +191,7 @@ namespace GazeShift
             bool hitAccept = acceptCollider.Raycast(ray, out _, RayLength);
             session.BeginTrigger(hitAccept); closureSignaled = false;
             if (hitAccept) AcceptRegions();
+            else ClearActionInstruction(BlockedAction.Stroke);
         }
         private void HandleStroke(bool canvasHit, Vector2 hit)
         {
@@ -335,7 +336,7 @@ namespace GazeShift
             else if (!closureSignaled) { Pulse(0.3f, ClosurePulseDuration); closureSignaled = true; }
             strokeLine.SetEnabled(session.Stroke.Count > 0); strokeLine.SetCount(session.Stroke.Count);
             for (int i = 0; i < session.Stroke.Count; i++) strokeLine.SetPoint(i, new Vector3(session.Stroke[i].x, session.Stroke[i].y, -0.004f));
-            UpdateRing(startRing, session.Stroke.Count > 0, session.Stroke.Count > 0 ? session.Stroke[0] : Vector2.zero, RegionSession.ClosureRadius, ready ? SelectedWidth : OutlineWidth);
+            UpdateRing(startRing, session.Stroke.Count > 0, session.Stroke.Count > 0 ? session.Stroke[0] : Vector2.zero, session.ClosureRadius, ready ? SelectedWidth : OutlineWidth);
         }
         private static void UpdateRing(OutlinePair ring, bool visible, Vector2 center, float radius, float width)
         {

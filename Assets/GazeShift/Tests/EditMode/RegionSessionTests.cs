@@ -6,6 +6,33 @@ namespace GazeShift.Tests
 {
     public sealed class RegionSessionTests
     {
+        // A global start ring used to accept this open L before any genuine return.
+        [Test] public void OpenStartZoneLIsNotReadyAndFailedReleaseRetainsTrace()
+        {
+            var session = new RegionSession(); session.BeginTrigger(false);
+            foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.04f, 0), new Vector2(0, 0.04f) }) session.AddPoint(point);
+            Assert.IsFalse(session.IsClosureReady, "An open L must return to its actual closing zone before readiness.");
+            Assert.IsFalse(session.FinishStroke()); Assert.IsFalse(session.IsDrawing);
+            Assert.AreEqual(3, session.Stroke.Count); Assert.IsEmpty(session.Pending);
+        }
+        [Test] public void ExplicitlyClosedTwoPointFiveCentimeterSquareRemainsAccepted()
+        {
+            var session = new RegionSession(); session.BeginTrigger(false);
+            foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.025f, 0), new Vector2(0.025f, 0.025f), new Vector2(0, 0.025f) }) session.AddPoint(point);
+            Assert.IsFalse(session.IsClosureReady, "The last corner is still an open trace.");
+            session.AddPoint(Vector2.zero);
+            Assert.IsTrue(session.IsClosureReady); Assert.IsTrue(session.FinishStroke());
+            Assert.AreEqual(0.000625f, RegionGeometry.SignedArea(session.Pending[0].Source), 0.0000001f);
+        }
+        [Test] public void RetainedSmallSquareResumesAndClosesAfterGenuineReturn()
+        {
+            var session = new RegionSession(); session.BeginTrigger(false);
+            foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.025f, 0), new Vector2(0.025f, 0.025f) }) session.AddPoint(point);
+            Assert.IsFalse(session.FinishStroke()); Assert.AreEqual(3, session.Stroke.Count);
+            session.BeginTrigger(false); session.AddPoint(new Vector2(0, 0.025f));
+            Assert.IsFalse(session.IsClosureReady); session.AddPoint(Vector2.zero);
+            Assert.IsTrue(session.FinishStroke()); Assert.AreEqual(4, session.Pending[0].Source.Length);
+        }
         [Test] public void AcceptHitDoesNotStartStroke()
         {
             var session = new RegionSession();
@@ -151,9 +178,11 @@ namespace GazeShift.Tests
         [Test] public void SubSpacingExitStillInvalidatesClosureCandidate()
         {
             var session = new RegionSession(); session.BeginTrigger(false);
-            foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.1f, 0), new Vector2(0.1f, 0.1f), new Vector2(0, 0.1f), new Vector2(0, 0.0455f) }) session.AddPoint(point);
+            foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.1f, 0), new Vector2(0.1f, 0.1f), new Vector2(0, 0.1f) }) session.AddPoint(point);
+            float radius = session.ClosureRadius;
+            session.AddPoint(new Vector2(0, radius - 0.00025f));
             Assert.IsTrue(session.IsClosureReady); int samples = session.Stroke.Count;
-            session.AddPoint(new Vector2(0, 0.046f));
+            session.AddPoint(new Vector2(0, radius + 0.00025f));
             Assert.AreEqual(samples, session.Stroke.Count, "The movement is less than the sampling distance.");
             Assert.IsFalse(session.IsClosureReady, "Sampling must not hide an exit from the closure ring.");
             Assert.IsFalse(session.FinishStroke());
