@@ -41,7 +41,13 @@ The manual GitHub Actions workflow requires repository Unity license credentials
 
 ## Verification and limits
 
-Local verification on October 17, 2026: Unity 6000.4.1f1 imported and compiled the project; all **58 EditMode tests passed**, including repeatable XR/scene setup, UI resource cleanup, camera freshness, and forced desktop Metal shader compilation. The exact Configure batch entry point succeeded. The Android build attempt stopped at the explicit missing Android Build Support/SDK/NDK/OpenJDK gate, so no APK or headset interaction is verified. GitHub Actions has not run.
+Local verification on October 18, 2026: a fresh native Unity 6000.4.1f1 run passed **58/58 EditMode tests**, with zero failures/skips and process exit 0, including forced desktop Metal shader compilation.
+
+Android ARM64 IL2CPP native compilation completed successfully (all 1,506 build nodes evaluated); a disk guard then stopped the Unity process during Gradle packaging. The already-generated Gradle release project was packaged separately with a 1 GiB heap and two workers: **assembleRelease exited 0 and produced a verified APK**.
+
+ZIP integrity, ARM64-only ELF libraries, APK v2 signature, package/Quest targets, API 32 minimum and headset-camera permission passed checks. The APK uses the Android Debug certificate. Its SHA256 is `ea334bc93501655ef6660bc535303c9fd9e584541ae7f1234f1786d3d4780cfb`. Headset installation and physical interaction remain separate, pending checks; GitHub Actions has not run.
+
+Post-test SDK Editor utility changes to orientation and the current desktop quality level were restored to the verified APK baseline; the suite does not establish physical headset orientation. Opening the project interactively may reapply these SDK preferences; saving them requires a fresh APK build and verification.
 
 Tests cover concave polygon triangulation, winding, invalid strokes, overlap/bounds rejection, scale limits, controller action priority, camera projection failure, and camera freshness recovery. Tests and compilation cannot verify headset alignment or physical interaction.
 
