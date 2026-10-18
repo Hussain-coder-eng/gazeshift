@@ -238,6 +238,60 @@ namespace GazeShift.Tests
             }
             finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
         }
+        [Test] public void RetainedTraceRemainsVisibleAndBDiscardsItBeforeUndoingSelectedCopy()
+        {
+            var owner = new GameObject("Recovery UI test"); var eye = new GameObject("Test eye"); var texture = new Texture2D(2, 2);
+            try
+            {
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new LiveSource(texture), eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); DrawCircle(session, new Vector2(-0.25f, 0));
+                Call(interaction, "AcceptRegions"); RegionData accepted = session.Accepted[0];
+                session.BeginTrigger(false); session.AddPoint(Vector2.zero); session.AddPoint(new Vector2(0.1f, 0));
+                Assert.IsFalse(session.FinishStroke()); Call(interaction, "UpdateStrokeOutline");
+                foreach (LineRenderer line in eye.GetComponentsInChildren<LineRenderer>())
+                    if (line.gameObject.name == "Current stroke inner") { Assert.IsTrue(line.enabled); Assert.AreEqual(2, line.positionCount); }
+                StringAssert.Contains("resume", (string)Call(interaction, "StageInstruction"));
+                Call(interaction, "UndoLastRegion"); Assert.AreEqual(1, session.Accepted.Count); Assert.AreSame(accepted, Read<RegionData>(interaction, "selected"));
+                Assert.IsEmpty(session.Stroke); Call(interaction, "UndoLastRegion"); Assert.IsEmpty(session.Accepted);
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
+        [Test] public void ClosureRingMatchesThresholdAndPulseCanReenterAfterLeavingZone()
+        {
+            var owner = new GameObject("Closure UI test"); var eye = new GameObject("Test eye");
+            try
+            {
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new UnavailableSource(), eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); session.BeginTrigger(false);
+                foreach (Vector2 point in new[] { Vector2.zero, new Vector2(0.1f, 0), new Vector2(0.1f, 0.1f), new Vector2(0, 0.1f), new Vector2(0, 0.04f) }) session.AddPoint(point);
+                Call(interaction, "UpdateStrokeOutline"); Assert.IsTrue(Read<bool>(interaction, "closureSignaled"));
+                foreach (LineRenderer line in eye.GetComponentsInChildren<LineRenderer>())
+                    if (line.gameObject.name == "Stroke start ring inner") Assert.AreEqual(0.04579214f, line.GetPosition(0).x, 0.000001f);
+                session.AddPoint(new Vector2(-0.05f, 0.05f)); Call(interaction, "UpdateStrokeOutline"); Assert.IsFalse(Read<bool>(interaction, "closureSignaled"));
+                session.AddPoint(new Vector2(-0.02f, 0.02f)); Call(interaction, "UpdateStrokeOutline"); Assert.IsTrue(Read<bool>(interaction, "closureSignaled"));
+                Assert.IsTrue(Read<InteractionFeedback>(interaction, "feedback").IsPulsing(Time.unscaledTime));
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); }
+        }
+        [Test] public void BlockedEnlargementExplainsOpenSpaceWhileDragKeepsMovementInstructionAndUvs()
+        {
+            var owner = new GameObject("Resize UI test"); var eye = new GameObject("Test eye"); var texture = new Texture2D(2, 2);
+            try
+            {
+                RegionInteraction interaction = owner.AddComponent<RegionInteraction>(); interaction.Initialize(new LiveSource(texture), eye.transform);
+                RegionSession session = Read<RegionSession>(interaction, "session"); DrawCircle(session, Vector2.zero);
+                Call(interaction, "AcceptRegions"); Call(interaction, "UpdateLiveRegions"); RegionData region = session.Accepted[0];
+                LiveRegionView view = Read<Dictionary<RegionData, LiveRegionView>>(interaction, "views")[region];
+                Vector2[] sourceUvs = Read<Mesh>(view, "sourceMesh").uv;
+                Vector2 center = region.Destination; Call(interaction, "MoveSelected", center, 1.25f); Assert.AreEqual(1.25f, region.Scale);
+                Call(interaction, "UpdateLiveRegions"); CollectionAssert.AreEqual(sourceUvs, Read<Mesh>(view, "sourceMesh").uv); CollectionAssert.AreEqual(sourceUvs, Read<Mesh>(view, "copyMesh").uv);
+                Call(interaction, "MoveSelected", new Vector2(0.56f, 0), 1f); Call(interaction, "MoveSelected", region.Destination, 1.25f);
+                Assert.AreEqual("Move copy into open space to enlarge.\nStick down: shrink.", Read<string>(interaction, "actionInstruction"));
+                Call(interaction, "MoveSelected", region.SourceCenter, region.Scale);
+                StringAssert.Contains("Keep copies", Read<string>(interaction, "actionInstruction"));
+            }
+            finally { DestroyInteraction(owner); Object.DestroyImmediate(eye); Object.DestroyImmediate(texture); }
+        }
         private static void AssertPairHiddenAndUnbound(LiveRegionView view)
         {
             foreach (string field in new[] { "sourceObject", "copyObject" })

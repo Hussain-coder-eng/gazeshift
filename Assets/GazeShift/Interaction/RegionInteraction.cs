@@ -183,7 +183,6 @@ namespace GazeShift
                 {
                     session.AddPoint(hit);
                     if (session.StrokeOverflowed) ShowActionInstruction(BlockedAction.Stroke, "Loop too long. Trace a shorter loop.\nPress trigger again to restart.");
-                    if (session.IsClosureReady && !closureSignaled) { Pulse(0.3f, ClosurePulseDuration); closureSignaled = true; }
                 }
             }
             if (!OVRInput.GetUp(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch) || !session.IsDrawing) return;
@@ -224,12 +223,16 @@ namespace GazeShift
         private void MoveSelected(Vector2 destination, float scale)
         {
             if (session.TryPlace(selected, destination, scale)) { ClearActionInstruction(BlockedAction.Movement); return; }
-            ShowActionInstruction(BlockedAction.Movement, "Keep copies inside the view and apart.\nMove elsewhere or right stick down.");
+            bool enlarging = selected != null && destination == selected.Destination && scale > selected.Scale;
+            ShowActionInstruction(BlockedAction.Movement, enlarging ? "Move copy into open space to enlarge.\nStick down: shrink." : "Keep copies inside the view and apart.\nMove elsewhere or right stick down.");
             if (feedback.TryReject(Time.unscaledTime)) Pulse(0.25f, AcceptPulseDuration);
         }
         private void UndoLastRegion()
         {
-            session.UndoLast(); selected = null; hovered = null; dragging = false;
+            bool discardingStroke = session.IsDrawing || session.Stroke.Count > 0;
+            session.UndoLast();
+            if (!discardingStroke) { selected = null; hovered = null; }
+            dragging = false; closureSignaled = false;
             actionInstruction = null; blockedAction = BlockedAction.None;
             SyncOutlines(); UpdateStrokeOutline();
         }
@@ -307,9 +310,12 @@ namespace GazeShift
         }
         private void UpdateStrokeOutline()
         {
-            strokeLine.SetEnabled(session.IsDrawing); strokeLine.SetCount(session.Stroke.Count);
+            bool ready = session.IsClosureReady;
+            if (!ready) closureSignaled = false;
+            else if (!closureSignaled) { Pulse(0.3f, ClosurePulseDuration); closureSignaled = true; }
+            strokeLine.SetEnabled(session.Stroke.Count > 0); strokeLine.SetCount(session.Stroke.Count);
             for (int i = 0; i < session.Stroke.Count; i++) strokeLine.SetPoint(i, new Vector3(session.Stroke[i].x, session.Stroke[i].y, -0.004f));
-            UpdateRing(startRing, session.IsDrawing && session.Stroke.Count > 0, session.Stroke.Count > 0 ? session.Stroke[0] : Vector2.zero, 0.014f, session.IsClosureReady ? SelectedWidth : OutlineWidth);
+            UpdateRing(startRing, session.Stroke.Count > 0, session.Stroke.Count > 0 ? session.Stroke[0] : Vector2.zero, RegionSession.ClosureRadius, ready ? SelectedWidth : OutlineWidth);
         }
         private static void UpdateRing(OutlinePair ring, bool visible, Vector2 center, float radius, float width)
         {
@@ -331,6 +337,7 @@ namespace GazeShift
         private string StageInstruction()
         {
             if (session.IsDrawing) return session.IsClosureReady ? "Loop ready: release right trigger.\nB: undo. Hold left X: original view." : "Return to the start ring; release.\nB: undo. Hold left X: original view.";
+            if (session.Stroke.Count > 0) return "Hold right trigger to resume this loop.\nB: discard trace. Return to start ring.";
             if (session.Pending.Count > 0) return "Press A or Accept regions.\nB: undo. Left stick: move this panel.";
             if (selected != null) return "Right stick: resize. Grip: move.\nB: undo. Hold left X: original view.";
             if (session.Accepted.Count > 0) return "Grip a source or copy to move it.\nLeft stick: panel. Hold left X: original.";

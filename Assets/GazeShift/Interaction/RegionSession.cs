@@ -36,8 +36,8 @@ namespace GazeShift
 
     public sealed class RegionSession
     {
-        // Retained from the phone prototype; headset comfort still requires device validation.
-        public const int MinimumSamples = 20;
+        // Three distinct vertices are the geometric minimum; frame rate must not decide closure.
+        public const int MinimumSamples = 3;
         public const int MaximumSamples = 512;
         public const float ClosureDiagonalFraction = 0.03f;
         public const float MinimumScale = 0.25f;
@@ -46,11 +46,18 @@ namespace GazeShift
         private const float PlacementGap = 0.005f;
         private const int MaximumPlacementCandidates = 13;
         private const int MaximumAcceptanceChecks = 32768;
+        // Physical feedback showed scale1 touching placements blocked the first enlargement.
+        private const float InitialHeadroomScale = 1.25f;
+        // Five interior rows include quarter-span positions missed by the legacy edge/center grid.
+        private const int HeadroomGridSize = 5;
+        private const int AdjacentCandidateCount = 4;
+        private Vector2[] closureVertices;
+        private int[] closureTriangles;
         private int remainingAcceptanceChecks;
         public static readonly Vector2 CanvasHalfExtent = new Vector2(0.65f, 0.4f);
         public bool IsDrawing { get; private set; }
-        public bool IsClosureReady => IsDrawing && Stroke.Count >= MinimumSamples &&
-            (Stroke[0] - Stroke[Stroke.Count - 1]).magnitude <= (CanvasHalfExtent * 2).magnitude * ClosureDiagonalFraction;
+        public static float ClosureRadius => (CanvasHalfExtent * 2).magnitude * ClosureDiagonalFraction;
+        public bool IsClosureReady => IsDrawing && closureVertices != null && !CoversAcceptedCopy(closureVertices);
         public bool StrokeOverflowed { get; private set; }
         internal int LastPlacementAttempts { get; private set; }
         public readonly List<Vector2> Stroke = new List<Vector2>();
@@ -59,34 +66,43 @@ namespace GazeShift
 
         public void BeginTrigger(bool hitAccept)
         {
-            CancelStroke(); StrokeOverflowed = false;
-            if (!hitAccept) IsDrawing = true;
+            if (hitAccept) CancelStroke();
+            else IsDrawing = true;
+            StrokeOverflowed = false;
         }
         public void AddPoint(Vector2 point)
         {
             if (!IsDrawing || !RegionGeometry.IsFinite(point) || !InsideCanvas(point)) return;
+            // A sub-millimeter exit still ends readiness even when no new sample is stored.
+            if (Stroke.Count > 0 && (Stroke[0] - point).sqrMagnitude > ClosureRadius * ClosureRadius) ClearClosureCandidate();
             if (Stroke.Count > 0 && (point - Stroke[Stroke.Count - 1]).sqrMagnitude < SampleSpacing * SampleSpacing) return;
             if (Stroke.Count == MaximumSamples) { CancelStroke(); StrokeOverflowed = true; return; }
             Stroke.Add(point);
+            if ((Stroke[0] - point).sqrMagnitude > ClosureRadius * ClosureRadius)
+            { ClearClosureCandidate(); return; }
+            if (Stroke.Count >= MinimumSamples && RegionGeometry.TryTriangulate(Stroke, out Vector2[] vertices, out int[] indices) && !CoversAcceptedCopy(vertices))
+            { closureVertices = vertices; closureTriangles = indices; }
+            // Keep the last simple prefix for small in-ring release overshoots only.
+            // Exiting the ring above invalidates it before any later re-entry can close.
         }
-        public void CancelStroke() { IsDrawing = false; Stroke.Clear(); }
+        private void ClearClosureCandidate() { closureVertices = null; closureTriangles = null; }
+        private bool CoversAcceptedCopy(Vector2[] vertices)
+        {
+            for (int i = 0; i < Accepted.Count; i++)
+                if (RegionGeometry.Overlaps(vertices, Accepted[i].CopyBoundary)) return true;
+            return false;
+        }
+        public void CancelStroke() { IsDrawing = false; Stroke.Clear(); ClearClosureCandidate(); }
         public bool FinishStroke()
         {
-            bool valid = false;
-            if (IsClosureReady &&
-                RegionGeometry.TryTriangulate(Stroke, out Vector2[] vertices, out int[] indices) && vertices.Length >= MinimumSamples)
-            {
-                bool coversCopy = false;
-                for (int i = 0; i < Accepted.Count; i++)
-                    if (RegionGeometry.Overlaps(vertices, Accepted[i].CopyBoundary)) { coversCopy = true; break; }
-                if (!coversCopy) { Pending.Add(new RegionData(vertices, indices)); valid = true; }
-            }
+            if (!IsClosureReady) { IsDrawing = false; return false; }
+            Pending.Add(new RegionData(closureVertices, closureTriangles));
             CancelStroke();
-            return valid;
+            return true;
         }
         public RegionData UndoLast()
         {
-            CancelStroke();
+            if (IsDrawing || Stroke.Count > 0) { CancelStroke(); return null; }
             List<RegionData> regions = Pending.Count > 0 ? Pending : Accepted;
             if (regions.Count == 0) return null;
             RegionData removed = regions[regions.Count - 1];
@@ -105,7 +121,7 @@ namespace GazeShift
                 originalPlacements[i] = Pending[i].HasPlacement;
             }
             for (int i = 0; i < Pending.Count; i++) Pending[i].HasPlacement = false;
-            for (int i = 0; i < Pending.Count; i++) if (!FindInitialDestination(Pending[i]))
+            for (int i = 0; i < Pending.Count; i++) if (!FindInitialDestination(Pending[i]) && !FindHeadroomDestination(Pending[i]))
             {
                 for (int j = 0; j < Pending.Count; j++)
                 {
@@ -115,6 +131,9 @@ namespace GazeShift
                 }
                 return false;
             }
+            // Establish every original scale1 fallback before spending remaining work on preferences.
+            // A failed headroom probe leaves its established pose and boundary unchanged.
+            for (int i = 0; i < Pending.Count; i++) FindHeadroomDestination(Pending[i]);
             Accepted.AddRange(Pending); Pending.Clear();
             return true;
         }
@@ -141,6 +160,57 @@ namespace GazeShift
                 if (remainingAcceptanceChecks == 0) return false;
             }
             return false;
+        }
+        private bool FindHeadroomDestination(RegionData region)
+        {
+            Vector2 range = CanvasHalfExtent - region.SourceHalfExtent * InitialHeadroomScale - Vector2.one * PlacementGap;
+            if (range.x < 0 || range.y < 0) return false;
+            var candidates = new Vector2[AdjacentCandidateCount + HeadroomGridSize * HeadroomGridSize];
+            Vector2 offset = region.SourceHalfExtent * (1 + InitialHeadroomScale) + Vector2.one * PlacementGap;
+            candidates[0] = region.SourceCenter + Vector2.left * offset.x;
+            candidates[1] = region.SourceCenter + Vector2.right * offset.x;
+            candidates[2] = region.SourceCenter + Vector2.down * offset.y;
+            candidates[3] = region.SourceCenter + Vector2.up * offset.y;
+            for (int y = 0; y < HeadroomGridSize; y++)
+                for (int x = 0; x < HeadroomGridSize; x++)
+                    candidates[AdjacentCandidateCount + y * HeadroomGridSize + x] = new Vector2(
+                        (2f * x / (HeadroomGridSize - 1) - 1) * range.x,
+                        (2f * y / (HeadroomGridSize - 1) - 1) * range.y);
+            Array.Sort(candidates, (left, right) => left.sqrMagnitude.CompareTo(right.sqrMagnitude));
+            for (int i = 0; i < candidates.Length && remainingAcceptanceChecks > 0; i++)
+            {
+                LastPlacementAttempts++;
+                if (HasHeadroom(region, candidates[i]) && TryPlace(region, candidates[i], 1, ref remainingAcceptanceChecks)) return true;
+            }
+            return false;
+        }
+        private bool HasHeadroom(RegionData region, Vector2 center)
+        {
+            Vector2 half = region.SourceHalfExtent * InitialHeadroomScale;
+            if (Math.Abs(center.x) + half.x > CanvasHalfExtent.x || Math.Abs(center.y) + half.y > CanvasHalfExtent.y) return false;
+            // The expanded AABB contains every copy over the full 1..1.25 path, including concave copies.
+            // Endpoint-only polygon validity cannot guarantee clearance during that enlargement.
+            for (int i = 0; i < Accepted.Count; i++)
+            {
+                RegionData other = Accepted[i];
+                if (!BoundsClear(center, half, other.SourceCenter, other.SourceHalfExtent)) return false;
+                if (other != region && !BoundsClear(center, half, other.Destination, other.SourceHalfExtent * other.Scale)) return false;
+            }
+            for (int i = 0; i < Pending.Count; i++)
+            {
+                RegionData other = Pending[i];
+                if (!BoundsClear(center, half, other.SourceCenter, other.SourceHalfExtent)) return false;
+                if (other != region && other.HasPlacement && !BoundsClear(center, half, other.Destination, other.SourceHalfExtent * other.Scale)) return false;
+            }
+            return true;
+        }
+        private bool BoundsClear(Vector2 center, Vector2 half, Vector2 otherCenter, Vector2 otherHalf)
+        {
+            if (remainingAcceptanceChecks <= 0) return false;
+            remainingAcceptanceChecks--;
+            Vector2 separation = center - otherCenter;
+            return Math.Abs(separation.x) > half.x + otherHalf.x + RegionGeometry.Epsilon ||
+                Math.Abs(separation.y) > half.y + otherHalf.y + RegionGeometry.Epsilon;
         }
         public bool TryPlace(RegionData region, Vector2 center, float scale)
         {
