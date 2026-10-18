@@ -43,7 +43,7 @@ The manual GitHub Actions workflow requires repository Unity license credentials
 
 Local verification on October 18, 2026: a fresh native Unity 6000.4.1f1 run passed **58/58 EditMode tests**, with zero failures/skips and process exit 0, including forced desktop Metal shader compilation.
 
-The canonical Unity `GazeShift.Editor.QuestProjectSetup.BuildAndroid` entrypoint subsequently completed **with process exit 0 and Build Report Success**, using the normal Android SDK/Gradle pipeline. All 1,506 native build nodes were evaluated successfully, including ARM64 IL2CPP and Vulkan shaders. This closes the full Unity build gate after the earlier disk-guard interruption and separate Gradle packaging recovery.
+The canonical Unity `GazeShift.Editor.QuestProjectSetup.BuildAndroid` entrypoint subsequently completed **with process exit 0 and Build Report Success**, using the normal Android SDK/Gradle pipeline. All 1,506 native build nodes were evaluated successfully for ARM64 IL2CPP; the Vulkan shader stage also completed successfully. This closes the full Unity build gate after the earlier disk-guard interruption and separate Gradle packaging recovery.
 
 ZIP integrity, ARM64-only installable native libraries, APK v2 signature, package/Quest targets, API 32 minimum and headset-camera permission passed checks. Meta’s unchanged `assets/lib` metrics resources include both ARM64 and armeabi-v7a; the installable app ABI is ARM64 only. The APK uses the Android Debug certificate. Its SHA256 is `f9f7d9479171518602cf69e1c1daf86453b5c4797b1d464aa41b9cac272fd1d6`. Headset installation and physical interaction remain separate, pending checks; GitHub Actions has not run.
 
